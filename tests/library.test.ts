@@ -51,6 +51,13 @@ describe('resolveInLibrary', () => {
     expect(resolveInLibrary(root, 'a/../../secret.txt')).toBeNull()
     expect(resolveInLibrary(root, '')).toBeNull()
   })
+  it('a drive root ("D:\\") holds the files right in it', () => {
+    const drive = path.parse(process.cwd()).root // "D:\" on Windows
+    expect(resolveInLibrary(drive, 'A.html')).toBe(path.join(drive, 'A.html'))
+    expect(resolveInLibrary(drive, 'sub/A.html')).toBe(path.join(drive, 'sub', 'A.html'))
+    expect(resolveInLibrary(drive, '')).toBeNull()
+    expect(resolveInLibrary(drive, '..')).toBeNull()
+  })
 })
 
 describe('scanLibrary', () => {

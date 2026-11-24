@@ -46,7 +46,9 @@ const MAX_BOOK_TEXT = 3 * 1024 * 1024
 export function resolveInLibrary(root: string, rel: string): string | null {
   const base = path.resolve(root)
   const abs = path.resolve(base, rel)
-  return abs.startsWith(base + path.sep) ? abs : null
+  // A drive root ("D:\") already ends with the separator: files right in it are inside too.
+  const prefix = base.endsWith(path.sep) ? base : base + path.sep
+  return abs.startsWith(prefix) && abs.length > prefix.length ? abs : null
 }
 
 const EXTENSIONS: Record<string, DocKind> = {
