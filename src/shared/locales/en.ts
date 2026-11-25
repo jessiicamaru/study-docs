@@ -333,6 +333,9 @@ export const EN: Record<string, string> = {
   'Ô này có công thức: app chỉ hiện kết quả Excel đã lưu. Hãy sửa công thức trong Excel.':
     'This cell has a formula: the app shows the result Excel saved. Edit the formula in Excel.',
   'Đã lưu.': 'Saved.',
+  'Ô {0} là tên cột của một bảng Excel (Table); hãy đổi tên cột trong Excel.': 'Cell {0} is a column name of an Excel table; rename the column in Excel.',
+  'Ô này là tên cột của một bảng Excel (Table): đổi tên cột trong Excel để bảng và công thức vẫn khớp.':
+    'This cell is a column name of an Excel table: rename the column in Excel so the table and its formulas still match.',
   'Đang mở…': 'Opening…',
   'Ô đang chọn': 'Selected cell',
   'Thêm hàng bên dưới ô đang chọn': 'Add a row below the selected cell',

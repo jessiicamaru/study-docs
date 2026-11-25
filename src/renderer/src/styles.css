@@ -1044,3 +1044,4 @@ dialog::backdrop { backdrop-filter: blur(3px); }
 .doc-tab:hover .doc-tab-close, .doc-tab.active .doc-tab-close { opacity: 1; }
 .doc-tab-close:hover { background: var(--hover); color: var(--ink); }
 .doc-tab[draggable='true']:active { cursor: grabbing; }
+.sheet-grid td.table-header { font-weight: 600; background: color-mix(in srgb, var(--accent) 7%, var(--paper)); cursor: default; }

@@ -189,6 +189,8 @@ export interface SheetTab {
   truncated: boolean
   /** Why this sheet can only be read, if so. */
   readOnly?: string
+  /** Cells that are column names of an Excel table ("row:col"): read-only, Excel keeps those names in the table too. */
+  tableHeaders?: string[]
 }
 
 /** A CSV or XLSX file loaded for the grid. */

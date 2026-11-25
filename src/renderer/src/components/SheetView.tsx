@@ -76,6 +76,9 @@ export default function SheetView({ doc, onError, onInfo, onDirty, onReady }: Pr
   const valueAt = (r: number, c: number): string =>
     isCsv ? (rows[r]?.cells[c] ?? '') : (edits.get(`${tab}:${r}:${c}`) ?? baseCell(r, c)?.text ?? '')
   const isFormula = (r: number, c: number): boolean => !isCsv && baseCell(r, c)?.kind === 'formula'
+  // Column names of an Excel table: Excel keeps them in the table too, so they are changed there.
+  const headerCells = useMemo(() => new Set(sheet?.tableHeaders ?? []), [sheet])
+  const isTableHeader = (r: number, c: number): boolean => !isCsv && headerCells.has(`${r}:${c}`)
   const isChanged = (r: number, c: number): boolean =>
     isCsv ? rows[r]?.orig === undefined || (rows[r]?.cells[c] ?? '') !== (original[rows[r].orig!]?.[c] ?? '') : edits.has(`${tab}:${r}:${c}`)
 
@@ -90,7 +93,7 @@ export default function SheetView({ doc, onError, onInfo, onDirty, onReady }: Pr
 
   /** Sets a cell; an XLSX cell set back to what the file has is no longer an edit. */
   const setCell = (r: number, c: number, text: string): void => {
-    if (readOnly || isFormula(r, c)) return
+    if (readOnly || isFormula(r, c) || isTableHeader(r, c)) return
     if (isCsv) {
       setRows((prev) => {
         const next = prev.slice()
@@ -119,6 +122,7 @@ export default function SheetView({ doc, onError, onInfo, onDirty, onReady }: Pr
   const startEdit = (r: number, c: number, draft?: string): void => {
     if (readOnly) return onInfo?.(readOnly)
     if (isFormula(r, c)) return onInfo?.(t('Ô này có công thức: app chỉ hiện kết quả Excel đã lưu. Hãy sửa công thức trong Excel.'))
+    if (isTableHeader(r, c)) return onInfo?.(t('Ô này là tên cột của một bảng Excel (Table): đổi tên cột trong Excel để bảng và công thức vẫn khớp.'))
     setEditing({ r, c, draft: draft ?? valueAt(r, c) })
   }
   // While a cell closes, the grid takes the focus back right away (not a frame later, or a key
@@ -333,7 +337,8 @@ export default function SheetView({ doc, onError, onInfo, onDirty, onReady }: Pr
                       className={[
                         `k-${kind}`,
                         selected ? 'sel' : '',
-                        isChanged(r, c) ? 'changed' : ''
+                        isChanged(r, c) ? 'changed' : '',
+                        isTableHeader(r, c) ? 'table-header' : ''
                       ].join(' ')}
                       title={kind === 'formula' ? t('Công thức (chỉ xem): {0}', { 0: valueAt(r, c) }) : valueAt(r, c).length > 30 ? valueAt(r, c) : undefined}
                       onMouseDown={() => {

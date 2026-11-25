@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import JSZip from 'jszip'
-import { applyXlsxEdits, colName, formatSerialDate, parseCsv, parseDateText, parseRef, readXlsx, SheetError, writeCsv, xlsxText } from '../src/main/sheet'
+import { applyXlsxEdits, asExcelNumber, colName, formatSerialDate, parseCsv, parseDateText, parseRef, readXlsx, SheetError, writeCsv, xlsxText } from '../src/main/sheet'
 
 describe('CSV', () => {
   it('reads quotes, delimiters and line breaks inside quoted fields', () => {
@@ -161,5 +161,73 @@ describe('XLSX', () => {
 
   it('refuses files that are not workbooks', async () => {
     await expect(readXlsx(new TextEncoder().encode('not a zip'))).rejects.toThrow(SheetError)
+  })
+})
+
+/** A one-sheet workbook with the given cells (sheet XML) and, if asked, an Excel table A1:B3. */
+async function workbook(cells: string, shared: string[] = [], table = false): Promise<Uint8Array> {
+  const zip = new JSZip()
+  zip.file('xl/workbook.xml', '<workbook xmlns:r="r"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>')
+  zip.file('xl/_rels/workbook.xml.rels', '<Relationships><Relationship Id="rId1" Type="x" Target="worksheets/sheet1.xml"/></Relationships>')
+  zip.file('xl/sharedStrings.xml', `<sst>${shared.map((s) => `<si><t>${s}</t></si>`).join('')}</sst>`)
+  zip.file('xl/worksheets/sheet1.xml', `<worksheet><sheetData>${cells}</sheetData></worksheet>`)
+  if (table) {
+    zip.file('xl/worksheets/_rels/sheet1.xml.rels', '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>')
+    zip.file('xl/tables/table1.xml', '<table id="1" name="Lop" displayName="Lop" ref="A1:B3"><tableColumns count="2"><tableColumn id="1" name="MSSV"/><tableColumn id="2" name="Tên"/></tableColumns></table>')
+  }
+  return zip.generateAsync({ type: 'uint8array' })
+}
+const sheetXml = async (buf: Uint8Array): Promise<string> => (await JSZip.loadAsync(buf)).file('xl/worksheets/sheet1.xml')!.async('string')
+
+describe('XLSX: what a typed value becomes', () => {
+  it('a text cell stays text: "00123" -> "00124" keeps its zeros', async () => {
+    const out = await sheetXml(await applyXlsxEdits(await workbook('<row r="1"><c r="A1" t="s"><v>0</v></c></row>', ['00123']), [{ sheet: 0, row: 0, col: 0, text: '00124' }]))
+    expect(out).toContain('<c r="A1" t="inlineStr"><is><t xml:space="preserve">00124</t></is></c>')
+  })
+
+  it('long numbers (ID card, bank account) and leading zeros (phone) are kept as text, even in a number cell', async () => {
+    const buf = await workbook('<row r="1"><c r="A1"><v>5</v></c><c r="B1"><v>7</v></c></row>')
+    const out = await sheetXml(
+      await applyXlsxEdits(buf, [
+        { sheet: 0, row: 0, col: 0, text: '0912345678' },
+        { sheet: 0, row: 0, col: 1, text: '1.50' },
+        { sheet: 0, row: 0, col: 2, text: '1234567890123456789' },
+        { sheet: 0, row: 0, col: 3, text: '42' },
+        { sheet: 0, row: 0, col: 4, text: '1.50' },
+        { sheet: 0, row: 0, col: 5, text: '-3.25' }
+      ])
+    )
+    expect(out).toContain('<c r="A1" t="inlineStr"><is><t xml:space="preserve">0912345678</t></is></c>')
+    expect(out).toContain('<c r="B1"><v>1.5</v></c>') // a number cell stays a number
+    expect(out).toContain('<c r="C1" t="inlineStr"><is><t xml:space="preserve">1234567890123456789</t></is></c>')
+    expect(out).toContain('<c r="D1"><v>42</v></c>') // a new cell: a number when it reads back as typed
+    expect(out).toContain('<c r="E1" t="inlineStr"><is><t xml:space="preserve">1.50</t></is></c>')
+    expect(out).toContain('<c r="F1"><v>-3.25</v></c>')
+  })
+
+  it('asExcelNumber: only numbers Excel holds exactly', () => {
+    expect(asExcelNumber('42', true)).toBe(42)
+    expect(asExcelNumber('007', false)).toBeNull()
+    expect(asExcelNumber('123456789012345', false)).toBe(123456789012345)
+    expect(asExcelNumber('1234567890123456', false)).toBeNull()
+    expect(asExcelNumber('1e3', true)).toBeNull()
+    expect(asExcelNumber('1e3', false)).toBe(1000)
+    expect(asExcelNumber('12a', false)).toBeNull()
+  })
+})
+
+describe('XLSX: Excel tables', () => {
+  const cells = '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="s"><v>3</v></c></row>'
+  const shared = ['MSSV', 'Tên', '0012', 'An']
+  it('the column names of a table are marked, and are not changed here', async () => {
+    const buf = await workbook(cells, shared, true)
+    const [tab] = await readXlsx(buf)
+    expect(tab.tableHeaders?.sort()).toEqual(['0:0', '0:1'])
+    await expect(applyXlsxEdits(buf, [{ sheet: 0, row: 0, col: 1, text: 'Họ tên' }])).rejects.toThrow(SheetError)
+    const out = await sheetXml(await applyXlsxEdits(buf, [{ sheet: 0, row: 1, col: 1, text: 'Bình' }]))
+    expect(out).toContain('<c r="B2" t="inlineStr"><is><t xml:space="preserve">Bình</t></is></c>')
+  })
+  it('without a table nothing is marked', async () => {
+    expect((await readXlsx(await workbook(cells, shared)))[0].tableHeaders).toBeUndefined()
   })
 })

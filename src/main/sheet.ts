@@ -242,6 +242,31 @@ async function openWorkbook(buf: Uint8Array): Promise<Workbook> {
   return { zip, sheets, shared, dateStyles, date1904 }
 }
 
+/**
+ * The cells of a sheet that hold the column names of an Excel table ("row:col"). Excel keeps
+ * those names in the table's own part (xl/tables/*.xml) and in formulas like Table1[Name];
+ * changing the cell alone would make them disagree, and Excel would repair the file.
+ */
+async function tableHeaderCells(zip: JSZip, sheetPath: string): Promise<Set<string>> {
+  const cells = new Set<string>()
+  const relsPath = sheetPath.replace(/([^/]+)$/, '_rels/$1.rels')
+  const rels = zip.file(relsPath) ? await zip.file(relsPath)!.async('string') : ''
+  for (const m of rels.matchAll(/<(?:\w+:)?Relationship\b[^>]*>/g)) {
+    if (!/\/table"?$/.test(attr(m[0], 'Type') ?? '')) continue
+    const target = attr(m[0], 'Target')
+    const part = target ? resolvePart(sheetPath, target) : ''
+    const xml = part && zip.file(part) ? await zip.file(part)!.async('string') : ''
+    const tag = /<(?:\w+:)?table\b[^>]*>/.exec(xml)?.[0]
+    if (!tag || attr(tag, 'headerRowCount') === '0') continue
+    const [a, b] = (attr(tag, 'ref') ?? '').split(':')
+    const from = a ? parseRef(a) : null
+    const to = parseRef(b ?? a ?? '')
+    if (!from || !to) continue
+    for (let c = from.col; c <= to.col; c++) cells.add(`${from.row}:${c}`)
+  }
+  return cells
+}
+
 const pad = (n: number): string => String(n).padStart(2, '0')
 /** An Excel date serial as dd/mm/yyyy (and hh:mm when it has a time). */
 export function formatSerialDate(serial: number, date1904 = false): string {
@@ -339,9 +364,11 @@ export async function readXlsx(buf: Uint8Array): Promise<SheetTab[]> {
         cols = Math.max(cols, colIndex + 1)
       }
     }
+    const headers = await tableHeaderCells(wb.zip, sheet.path)
     tabs.push({
       name: sheet.name,
       rows,
+      tableHeaders: headers.size ? [...headers] : undefined,
       cols: Math.max(cols, 1),
       truncated,
       readOnly: readOnly ? t('Sheet này được tạo theo cách app không sửa an toàn được (ô không có vị trí); chỉ xem được.') : undefined
@@ -375,22 +402,45 @@ export interface XlsxEdit {
 }
 
 /** The XML of a cell with its new value, keeping its style. */
-function cellXml(prefix: string, ref: string, style: string | undefined, oldType: string | undefined, text: string, wb: Workbook): string {
+/** What a cell held before it was edited. */
+type OldCell = 'none' | 'text' | 'number' | 'bool' | 'other'
+
+/**
+ * A typed text as an Excel number, only when nothing is lost: no leading zeros (IDs, phone
+ * numbers: "0912..."), at most 15 digits (Excel's precision; longer ones, like ID card or bank
+ * account numbers, would be rounded), and, in a new cell, the number reads back as typed.
+ */
+export function asExcelNumber(text: string, exact: boolean): number | null {
+  const v = text.trim()
+  if (!/^-?(0|[1-9]\d*)(\.\d+)?(e[+-]?\d+)?$/i.test(v)) return null
+  if ((v.replace(/e.*$/i, '').match(/\d/g) ?? []).length > 15) return null
+  const n = Number(v)
+  if (!Number.isFinite(n)) return null
+  if (exact && String(n) !== v) return null
+  return n
+}
+
+/**
+ * The XML of a cell with its new value, keeping its style. A cell that held text stays text
+ * ("00123" stays "00123"); one that held a number, a date or TRUE/FALSE keeps that kind when
+ * the new text is one; a new cell becomes a number only when it reads back exactly as typed.
+ */
+function cellXml(prefix: string, ref: string, style: string | undefined, old: OldCell, text: string, wb: Workbook): string {
   const s = style !== undefined ? ` s="${style}"` : ''
   const open = `<${prefix}c r="${ref}"${s}`
   if (text === '') return `${open}/>`
-  const isDateStyle = style !== undefined && wb.dateStyles[Number(style)]
-  if (isDateStyle) {
+  const asText = `${open} t="inlineStr"><${prefix}is><${prefix}t xml:space="preserve">${escapeXml(text)}</${prefix}t></${prefix}is></${prefix}c>`
+  if (old === 'text') return asText
+  const value = (v: number): string => `${open}><${prefix}v>${v}</${prefix}v></${prefix}c>`
+  if (style !== undefined && wb.dateStyles[Number(style)]) {
     const serial = parseDateText(text, wb.date1904)
-    if (serial !== null) return `${open}><${prefix}v>${Number(serial.toPrecision(15))}</${prefix}v></${prefix}c>`
+    if (serial !== null) return value(Number(serial.toPrecision(15)))
   }
-  if (/^-?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(text.trim()) && Number.isFinite(Number(text))) {
-    return `${open}><${prefix}v>${Number(text.trim())}</${prefix}v></${prefix}c>`
-  }
-  if (oldType === 'b' && /^(true|false)$/i.test(text.trim())) {
+  if (old === 'bool' && /^(true|false)$/i.test(text.trim())) {
     return `${open} t="b"><${prefix}v>${/^true$/i.test(text.trim()) ? 1 : 0}</${prefix}v></${prefix}c>`
   }
-  return `${open} t="inlineStr"><${prefix}is><${prefix}t xml:space="preserve">${escapeXml(text)}</${prefix}t></${prefix}is></${prefix}c>`
+  const n = asExcelNumber(text, old !== 'number')
+  return n !== null ? value(n) : asText
 }
 
 /** The workbook with the edited cells changed; everything else in the file as it was. */
@@ -425,8 +475,12 @@ export async function applyXlsxEdits(buf: Uint8Array, edits: XlsxEdit[]): Promis
       }
       rows.set(Number(r) - 1, { attrs: rm[2], cells })
     }
+    const headers = await tableHeaderCells(wb.zip, sheet.path)
     const touched = new Set<number>()
     for (const e of list) {
+      if (headers.has(`${e.row}:${e.col}`)) {
+        throw new SheetError(t('Ô {0} là tên cột của một bảng Excel (Table); hãy đổi tên cột trong Excel.', { 0: colName(e.col) + (e.row + 1) }))
+      }
       let row = rows.get(e.row)
       if (!row) rows.set(e.row, (row = { attrs: ` r="${e.row + 1}"`, cells: new Map() }))
       const old = row.cells.get(e.col)
@@ -434,7 +488,10 @@ export async function applyXlsxEdits(buf: Uint8Array, edits: XlsxEdit[]): Promis
       if (old && /<(?:\w+:)?f\b/.test(old)) throw new SheetError(t('Ô {0} có công thức nên không sửa ở đây được; hãy sửa trong Excel.', { 0: colName(e.col) + (e.row + 1) }))
       // A new cell takes the style of its row, if the row has one.
       const style = old ? attr(` ${oldAttrs}`, 's') : attr(` ${row.attrs}`, 'customFormat') === '1' ? attr(` ${row.attrs}`, 's') : undefined
-      row.cells.set(e.col, cellXml(prefix, colName(e.col) + (e.row + 1), style, old ? attr(` ${oldAttrs}`, 't') : undefined, e.text, wb))
+      const oldType = old ? (attr(` ${oldAttrs}`, 't') ?? 'n') : null
+      const hadValue = !!old && /<(?:\w+:)?(v|is)\b/.test(old)
+      const kind: OldCell = !hadValue ? 'none' : oldType === 's' || oldType === 'inlineStr' || oldType === 'str' ? 'text' : oldType === 'n' ? 'number' : oldType === 'b' ? 'bool' : 'other'
+      row.cells.set(e.col, cellXml(prefix, colName(e.col) + (e.row + 1), style, kind, e.text, wb))
       touched.add(e.row)
     }
     // Rebuild sheetData: untouched rows exactly as they were, touched rows with cells in order.
