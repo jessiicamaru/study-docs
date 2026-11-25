@@ -321,6 +321,9 @@ export const EN: Record<string, string> = {
     "There is text or a comment between these blocks, so they can't be reordered here; use Raw.",
   'Thứ tự mới không khớp với file. File có thể vừa bị thay đổi.': "The new order doesn't match the file. It may have just been changed.",
   'Kéo để đổi chỗ': 'Drag to move',
+  'Tag đã có': 'Tags in use',
+  'Tạo tag mới': 'New tag',
+  '{0} tài liệu có tag này': '{0} documents have this tag',
   'Không xoá được ở đây; hãy dùng Raw.': "This can't be deleted here; use Raw.",
   'Bảng này có ô gộp (colspan/rowspan) nên không thêm/xoá hàng, cột ở đây được; hãy dùng Raw.':
     "This table has merged cells (colspan/rowspan), so rows and columns can't be added or deleted here; use Raw.",

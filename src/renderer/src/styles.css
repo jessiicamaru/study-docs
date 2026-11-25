@@ -930,3 +930,29 @@ dialog::backdrop { backdrop-filter: blur(3px); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- tag suggestions (pick a tag already used) ---------- */
+.tag-input { position: relative; display: inline-flex; }
+.tag-suggest {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; min-width: 220px; max-width: 320px;
+  display: flex; flex-direction: column; padding: 5px; border-radius: 12px;
+  background: var(--paper); border: 1px solid var(--line); box-shadow: 0 12px 32px rgba(0, 0, 0, .18);
+  animation: sd-pop .14s var(--ease); transform-origin: top left;
+}
+.tag-suggest-title { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); padding: 5px 9px 3px; }
+.tag-suggest-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border: none; background: transparent; color: var(--ink); text-align: left;
+  padding: 6px 9px; border-radius: 8px; font-size: 13px;
+}
+.tag-suggest-item.active { background: var(--accent-soft); color: var(--accent); }
+.tag-suggest-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tag-suggest-name b { font-weight: 700; color: var(--accent); }
+.tag-suggest-count {
+  flex: none; min-width: 22px; padding: 0 7px; border-radius: 999px; text-align: center;
+  font-size: 11.5px; font-variant-numeric: tabular-nums; line-height: 19px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink-soft);
+}
+.tag-suggest-item.active .tag-suggest-count { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.tag-suggest-item.new { border-top: 1px dashed var(--line); border-radius: 0 0 8px 8px; margin-top: 2px; color: var(--ink-soft); }
+.tag-suggest-item.new:first-child { border-top: none; margin-top: 0; border-radius: 8px; }

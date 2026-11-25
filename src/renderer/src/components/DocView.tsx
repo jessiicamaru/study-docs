@@ -17,6 +17,7 @@ import FindBar from './FindBar'
 import { HighlightToolbar, NotePopover, NotesPanel } from './Annotations'
 import { newAnnotationId, type OutlineItem, type ReaderHandle, type ScreenRect, type TextSelection } from './reader'
 import { t } from '../../../shared/i18n'
+import { normalize } from '../../../shared/text'
 import { confirmDialog } from '../lib/ask'
 import { colorHex, formatShortDate, type CalDocRef } from '../../../shared/calendar'
 import { CALENDAR_CHANGED } from './CalendarView'
@@ -29,6 +30,8 @@ interface Props {
   doc: DocEntry
   meta: DocMeta
   allDocs: DocEntry[]
+  /** Every tag of the workspace and how many documents have it (to pick one again). */
+  allTags: TagCount[]
   scrollTarget: ScrollTarget
   onUpdateMeta: (patch: Partial<Pick<DocMeta, 'tags' | 'status'>>) => void
   onOpenDoc: (path: string, hash?: string) => void
@@ -450,7 +453,7 @@ export default function DocView(props: Props) {
                 </button>
               ))}
             </div>
-            <TagEditor tags={meta.tags} onChange={(tags) => onUpdateMeta({ tags })} />
+            <TagEditor tags={meta.tags} allTags={props.allTags} onChange={(tags) => onUpdateMeta({ tags })} />
             <div className="spacer" />
             <button className={`btn ${showOutline ? 'active' : ''}`} onClick={toggleOutline} disabled={mode !== 'view'} title={t('Hiện/ẩn mục lục và ghi chú')}>{t('Mục lục')}{annotations.length > 0 && t(' · {0} ghi chú', { 0: annotations.length })}
             </button>
@@ -594,12 +597,54 @@ function MoreMenu({ doc, onError, onExport, hasNotes, exporting }: MoreMenuProps
   )
 }
 
-function TagEditor({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }) {
+/** A tag of the workspace and how many documents have it. */
+export interface TagCount {
+  tag: string
+  count: number
+}
+
+/**
+ * The tags you may pick for a typed text: those containing it (accents optional), the ones
+ * starting with it first, then the most used. With nothing typed, the most used tags.
+ */
+export function suggestTags(all: TagCount[], typed: string, taken: string[], limit = 8): TagCount[] {
+  const q = normalize(typed.trim().replace(/^#/, ''))
+  return all
+    .filter((x) => !taken.includes(x.tag) && (!q || normalize(x.tag).includes(q)))
+    .map((x) => ({ x, starts: q ? normalize(x.tag).startsWith(q) : true }))
+    .sort((p, r) => Number(r.starts) - Number(p.starts) || r.x.count - p.x.count || p.x.tag.localeCompare(r.x.tag, 'vi'))
+    .slice(0, limit)
+    .map((p) => p.x)
+}
+
+function TagEditor({ tags, allTags, onChange }: { tags: string[]; allTags: TagCount[]; onChange: (tags: string[]) => void }) {
   const [draft, setDraft] = useState('')
-  const add = (): void => {
-    const t = draft.trim().replace(/^#/, '')
-    if (t && !tags.includes(t)) onChange([...tags, t])
+  const [open, setOpen] = useState(false)
+  // The suggestion picked with the arrow keys (-1: none, Enter adds what was typed).
+  const [active, setActive] = useState(-1)
+  const typed = draft.trim().replace(/^#/, '')
+  const suggestions = open ? suggestTags(allTags, draft, tags) : []
+  // "New tag" when what was typed is not a tag yet.
+  const isNew = !!typed && !tags.includes(typed) && !allTags.some((x) => x.tag === typed)
+  const choices: { tag: string; count: number | null }[] = [...suggestions, ...(isNew ? [{ tag: typed, count: null }] : [])]
+  const addTag = (tag: string): void => {
+    const clean = tag.trim().replace(/^#/, '')
+    if (clean && !tags.includes(clean)) onChange([...tags, clean])
     setDraft('')
+    setActive(-1)
+  }
+  /** The typed text with the part matching it in bold. */
+  const marked = (tag: string): React.ReactNode => {
+    const q = normalize(typed)
+    const at = q ? normalize(tag).indexOf(q) : -1
+    if (at < 0) return tag
+    return (
+      <>
+        {tag.slice(0, at)}
+        <b>{tag.slice(at, at + typed.length)}</b>
+        {tag.slice(at + typed.length)}
+      </>
+    )
   }
   return (
     <div className="tag-editor">
@@ -611,19 +656,77 @@ function TagEditor({ tags, onChange }: { tags: string[]; onChange: (tags: string
           </button>
         </span>
       ))}
-      <input
-        value={draft}
-        placeholder="+ tag"
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ',') {
-            e.preventDefault()
-            add()
-          }
-          if (e.key === 'Backspace' && !draft && tags.length) onChange(tags.slice(0, -1))
-        }}
-        onBlur={add}
-      />
+      <span className="tag-input">
+        <input
+          value={draft}
+          placeholder="+ tag"
+          role="combobox"
+          aria-expanded={open && choices.length > 0}
+          aria-autocomplete="list"
+          onFocus={() => setOpen(true)}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            setOpen(true)
+            setActive(-1)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault()
+              setOpen(true)
+              if (!choices.length) return
+              // Down from the last one (or up from the first) goes back to what was typed.
+              const last = choices.length - 1
+              setActive((i) => (e.key === 'ArrowDown' ? (i >= last ? -1 : i + 1) : i <= -1 ? last : i - 1))
+              return
+            }
+            if (e.key === 'Escape' && open && choices.length) {
+              e.preventDefault()
+              e.stopPropagation()
+              setOpen(false)
+              setActive(-1)
+              return
+            }
+            if (e.key === 'Enter' || e.key === ',' || (e.key === 'Tab' && active >= 0)) {
+              e.preventDefault()
+              addTag(active >= 0 && choices[active] ? choices[active].tag : draft)
+            }
+            if (e.key === 'Backspace' && !draft && tags.length) onChange(tags.slice(0, -1))
+          }}
+          onBlur={() => {
+            setOpen(false)
+            if (typed) addTag(draft)
+          }}
+        />
+        {open && choices.length > 0 && (
+          <div className="tag-suggest" role="listbox">
+            {!typed && <div className="tag-suggest-title">{t('Tag đã có')}</div>}
+            {choices.map((c, i) => (
+              <button
+                key={(c.count === null ? 'new:' : '') + c.tag}
+                type="button"
+                role="option"
+                aria-selected={i === active}
+                className={`tag-suggest-item${i === active ? ' active' : ''}${c.count === null ? ' new' : ''}`}
+                // Keep the focus in the box: picking a tag goes on typing the next one.
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setActive(i)}
+                onClick={() => addTag(c.tag)}
+              >
+                {c.count === null ? (
+                  <span className="tag-suggest-name">{t('Tạo tag mới')} <b>#{c.tag}</b></span>
+                ) : (
+                  <>
+                    <span className="tag-suggest-name">#{marked(c.tag)}</span>
+                    <span className="tag-suggest-count" title={t('{0} tài liệu có tag này', { 0: c.count })}>
+                      {c.count}
+                    </span>
+                  </>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </span>
     </div>
   )
 }

@@ -178,6 +178,11 @@ export default function App() {
   // Settings > Thanh bên can hide pictures (folders of notes often have many).
   const docs = useMemo(() => (lib?.docs ?? []).filter((d) => ui.showImages || d.kind !== 'image'), [lib?.docs, ui.showImages])
   const meta = lib?.meta ?? {}
+  const allTags = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const d of docs) for (const tag of metaOf(lib?.meta ?? {}, d.path).tags) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    return [...counts].map(([tag, count]) => ({ tag, count }))
+  }, [docs, lib?.meta])
 
   /** Opens a document; returns false if you chose to stay because of unsaved edits. */
   const openDoc = useCallback(
@@ -598,6 +603,7 @@ export default function App() {
             doc={current}
             meta={metaOf(meta, current.path)}
             allDocs={docs}
+            allTags={allTags}
             scrollTarget={scrollTarget}
             onUpdateMeta={(patch) => updateMeta(current.path, patch)}
             onOpenDoc={openDoc}
