@@ -87,7 +87,7 @@ writeFileSync(
   // #1: open another file without anyone clicking
   const act = () => {
     if (location.hash === '#run-py') location = 'tool.py'
-    if (location.hash === '#run-txt') location = 'bang.csv'
+    if (location.hash === '#run-txt') location = 'slides.pptx'
     if (location.hash === '#popups') for (let i = 0; i < 5; i++) window.open('https://example.com/tab' + i)
   }
   act()
@@ -95,7 +95,7 @@ writeFileSync(
 </script></body></html>`
 )
 writeFileSync(path.join(library, 'backend', 'tool.py'), 'print("this must never run")\n')
-writeFileSync(path.join(library, 'backend', 'bang.csv'), 'a,b\n1,2\n')
+writeFileSync(path.join(library, 'backend', 'slides.pptx'), 'not opened by the app')
 // A book whose outline points at sections inside ONE file (common in real books): the
 // outline must follow the page you are on, not stay on the first section of that file.
 {
@@ -941,7 +941,7 @@ try {
   await runInPage('#run-txt')
   await page.waitForTimeout(800)
   const afterTxt = { opened: await app.evaluate(() => globalThis.__opened.length), asked: (await page.evaluate(() => window.__smokeAsked)) - askedBefore }
-  check(afterTxt.asked === 1 && afterTxt.opened === 0, 'a page opening a .csv file asks first (answered "Không": nothing opened)')
+  check(afterTxt.asked === 1 && afterTxt.opened === 0, 'a page opening a .pptx file (not read by the app) asks first (answered "Không": nothing opened)')
   await app.evaluate(({ shell, dialog }) => {
     Object.assign(shell, { openPath: globalThis.__real.openPath, showItemInFolder: globalThis.__real.showItemInFolder })
   })
@@ -1933,6 +1933,111 @@ try {
   }
   check(ocrFind === '1/1' && ocrSearch.some((h) => h.path.endsWith('Bản scan.pdf')), `its text is found with Ctrl+F (${ocrFind}) and by search (${ocrSearch.length})`)
   check(readdirSync(path.join(userData, 'ocr')).length === 1, 'OCR text is kept in the app\'s data; the PDF is not changed')
+
+  step('40. Spreadsheets: a CSV and an XLSX open as grids; edits are saved in place')
+  const csvSrc = '﻿Họ tên;Điểm\r\n"Nguyễn An";8,5\r\nTrần Bình;7\r\n'
+  writeFileSync(file('Bảng điểm.csv'), csvSrc)
+  const book = new JSZip()
+  book.file('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+  book.file('xl/workbook.xml', '<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Chi tiêu" sheetId="1" r:id="rId1"/></sheets></workbook>')
+  book.file('xl/_rels/workbook.xml.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="x" Target="worksheets/sheet1.xml"/></Relationships>')
+  book.file('xl/sharedStrings.xml', '<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>Khoản</t></si><si><t>Tiền</t></si><si><t>Sách giáo khoa</t></si></sst>')
+  book.file('xl/worksheets/sheet1.xml', '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>50000</v></c></row><row r="3"><c r="B3"><f>B2</f><v>50000</v></c></row></sheetData></worksheet>')
+  writeFileSync(file('Chi tiêu.xlsx'), await book.generateAsync({ type: 'nodebuffer' }))
+  await page.waitForSelector('.doc-list .row.doc >> text=Bảng điểm', { timeout: 10000 })
+  check((await page.textContent('.doc-list .row.doc:has-text("Bảng điểm") .kind')) === 'CSV', 'a CSV file is listed as CSV')
+  await openDoc('Bảng điểm')
+  await page.waitForSelector('.sheet-grid td[data-cell="1:0"]')
+  check((await page.textContent('.sheet-grid td[data-cell="1:0"]')) === 'Nguyễn An', 'the CSV opens as a grid (quotes and ; read)')
+  await page.click('.sheet-grid td[data-cell="2:1"]')
+  await page.keyboard.press('F2')
+  await page.keyboard.press('Control+A')
+  await page.keyboard.type('7,5')
+  await page.keyboard.press('Enter')
+  await page.click('.sheet-tools >> text=+ Hàng')
+  await page.keyboard.type('Lê Chi')
+  await page.keyboard.press('Tab')
+  await page.keyboard.type('9')
+  await page.keyboard.press('Control+s')
+  await page.waitForSelector('.sheet-dirty', { state: 'detached', timeout: 5000 })
+  check(read('Bảng điểm.csv') === '﻿Họ tên;Điểm\r\n"Nguyễn An";8,5\r\nTrần Bình;7,5\r\nLê Chi;9\r\n', `only the edited and new rows are written; the rest, the BOM and CRLF are kept (${JSON.stringify(read('Bảng điểm.csv'))})`)
+  await openDoc('Chi tiêu')
+  await page.waitForSelector('.sheet-grid td[data-cell="1:0"]')
+  check(
+    (await page.textContent('.sheet-grid td[data-cell="1:0"]')) === 'Sách giáo khoa' && (await page.getAttribute('.sheet-grid td[data-cell="2:1"]', 'class')).includes('k-formula'),
+    'the XLSX opens as a grid; a formula cell shows its saved result'
+  )
+  await page.dblclick('.sheet-grid td[data-cell="2:1"]')
+  check((await page.locator('.sheet-input').count()) === 0, 'a formula cell is not edited')
+  await page.click('.sheet-grid td[data-cell="1:1"]')
+  await page.keyboard.type('65000')
+  await page.keyboard.press('Enter')
+  await page.click('.sheet-bar >> text=Lưu (Ctrl+S)')
+  await page.waitForSelector('.sheet-dirty', { state: 'detached', timeout: 5000 })
+  const savedBook = await JSZip.loadAsync(readFileSync(file('Chi tiêu.xlsx')))
+  const sheetXml = await savedBook.file('xl/worksheets/sheet1.xml').async('string')
+  check(
+    sheetXml.includes('<c r="B2"><v>65000</v></c>') && sheetXml.includes('<c r="B3"><f>B2</f><v>50000</v></c>') && (await savedBook.file('xl/workbook.xml').async('string')).includes('fullCalcOnLoad="1"'),
+    'only the edited cell changes in the XLSX; its formulas are recalculated when Excel opens it'
+  )
+
+  step('41. HTML: pasting copied content keeps bold, italic and links, and its paragraphs and headings')
+  writeFileSync(file('Dán thử.html'), '<!doctype html>\n<html>\n<head><meta charset="utf-8"><title>Dán thử</title></head>\n<body>\n<p>Đầu</p>\n</body>\n</html>\n')
+  await page.waitForSelector('.doc-list .row.doc >> text=Dán thử', { timeout: 10000 })
+  await openDoc('Dán thử')
+  await page.click('.doc-controls >> text=Sửa chữ')
+  await page.waitForSelector('.html-format')
+  let pasteFrame = null
+  for (let i = 0; i < 100 && !pasteFrame; i++) {
+    pasteFrame = page.frames().find((x) => x.url().includes('?edit=1')) ?? null
+    if (!pasteFrame) await page.waitForTimeout(100)
+  }
+  await pasteFrame.waitForSelector('p[data-sd-block]')
+  await pasteFrame.click('p[data-sd-block]')
+  await page.keyboard.press('End')
+  await pasteFrame.evaluate(() => {
+    const copied =
+      '<meta charset="utf-8"><p>: một <span style="font-weight: 700;">đậm</span> và <em>nghiêng</em>, <a href="https://example.com/x" onclick="alert(1)">link</a></p>' +
+      '<h2 style="color: red">Mục mới</h2><p><b style="font-weight:normal;" id="docs-internal-guid-1">không đậm</b><script>alert(2)</script></p>'
+    const dt = new DataTransfer()
+    dt.setData('text/html', copied)
+    dt.setData('text/plain', 'plain')
+    document.querySelector('p[data-sd-block]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+  })
+  await page.click('.edit-bar >> text=Lưu (Ctrl+S)')
+  await editBarGone()
+  const pasted = read('Dán thử.html')
+  check(
+    pasted.includes('<p>Đầu: một <b>đậm</b> và <i>nghiêng</i>, <a href="https://example.com/x">link</a></p>\n<h2>Mục mới</h2>\n<p>không đậm</p>') &&
+      !/onclick|script|color|docs-internal/.test(pasted),
+    `formatting and blocks are kept; handlers, scripts, colours are not (${JSON.stringify(pasted.slice(pasted.indexOf('<body>'), pasted.indexOf('</body>')))})`
+  )
+
+  step('42. Tabs: Ctrl+click opens a new tab; Ctrl+Tab switches, Ctrl+W closes; a plain click reuses the tab')
+  await openDoc('React useEffect — khi nào chạy?')
+  await docPathIs(REACT)
+  const tabCount = () => page.locator('.doc-tab').count()
+  // Real key presses (they go through the main process, like typing; Playwright's keyboard does not).
+  const realKey = (keyCode, modifiers) =>
+    app.evaluate(({ BrowserWindow }, [k, m]) => {
+      const wc = BrowserWindow.getAllWindows().find((w) => w.isVisible()).webContents
+      wc.sendInputEvent({ type: 'keyDown', keyCode: k, modifiers: m })
+      wc.sendInputEvent({ type: 'keyUp', keyCode: k, modifiers: m })
+    }, [keyCode, modifiers])
+  const before = await tabCount()
+  await page.click('.doc-list .row.doc >> text=Lộ trình Backend', { modifiers: ['Control'] })
+  await docPathIs(ROADMAP)
+  check((await tabCount()) === before + 1 && (await page.textContent('.doc-tab.active .doc-tab-name')) === 'Lộ trình Backend', 'Ctrl+click opens the document in a new tab next to the open one')
+  await realKey('Tab', ['control'])
+  await docPathIs(REACT)
+  check((await page.textContent('.doc-tab.active .doc-tab-name')).startsWith('React useEffect'), 'Ctrl+Tab goes to the other tab')
+  await openDoc('Event Sourcing — Bài học để chép vào vở')
+  await docPathIs(ES)
+  check((await tabCount()) === before + 1, 'a plain click shows the document in the open tab (no new tab)')
+  await realKey('W', ['control'])
+  await docPathIs(ROADMAP)
+  check((await tabCount()) === before && (await page.locator('.doc-tab-name', { hasText: 'Event Sourcing' }).count()) === 0, 'Ctrl+W closes the tab and shows the one next to it (the window stays open)')
+  check(JSON.parse(await page.evaluate(() => localStorage.getItem('tabs:workspace'))).length === before, 'the tabs are kept for the next start')
 
   check(errors.length === 0, `no console errors${errors.length ? ': ' + errors.join(' | ') : ''}`)
 } catch (err) {

@@ -63,6 +63,8 @@ const EXTENSIONS: Record<string, DocKind> = {
   '.azw': 'mobi',
   '.docx': 'docx',
   '.txt': 'txt',
+  '.csv': 'sheet',
+  '.xlsx': 'sheet',
   '.png': 'image',
   '.jpg': 'image',
   '.jpeg': 'image',
@@ -134,7 +136,8 @@ export async function scanLibrary(root: string, previous: ScannedDoc[] = [], cac
         continue
       }
       const kind = kindOf(entry.name)
-      if (entry.isFile() && kind) files.push({ abs, kind })
+      // "~$Bài.docx" / "~$Bảng.xlsx": the lock file Word or Excel keeps while the file is open.
+      if (entry.isFile() && kind && !entry.name.startsWith('~$')) files.push({ abs, kind })
     }
   }
   await walk(root)
@@ -218,6 +221,13 @@ export async function extractText(abs: string, kind: DocKind): Promise<string> {
     }
   }
   if (kind === 'pdf') return (await import('./pdf-text')).pdfText(abs, MAX_BOOK_TEXT)
+  if (kind === 'sheet') {
+    // Spreadsheets: the text of every cell (big files: none, to keep search fast).
+    if ((await fs.stat(abs)).size > MAX_HASH_BYTES) return ''
+    const buf = await fs.readFile(abs)
+    if (abs.toLowerCase().endsWith('.xlsx')) return (await import('./sheet')).xlsxText(buf, MAX_BOOK_TEXT).catch(() => '')
+    return decodeText(buf).slice(0, MAX_BOOK_TEXT)
+  }
   const stat = await fs.stat(abs)
   if (stat.size > maxRead(kind)) return ''
   const source = await fs.readFile(abs, 'utf8')

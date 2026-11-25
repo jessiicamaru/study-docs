@@ -627,7 +627,7 @@ function FolderLink({ link, onOpenDoc, onUnlink }: { link: CalLinkView; onOpenDo
         <ul className="folder-docs">
           {shown.map((d) => (
             <li key={d.id}>
-              <span className={`kind kind-${d.kind}`}>{kindLabel(d.kind as DocEntry['kind'])}</span>
+              <span className={`kind kind-${d.kind}`}>{kindLabel(d.kind as DocEntry['kind'], d.id)}</span>
               <button className="link-btn" onClick={() => onOpenDoc(d.id)}>
                 {d.title}
               </button>

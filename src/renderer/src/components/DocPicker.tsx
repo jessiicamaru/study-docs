@@ -84,7 +84,7 @@ export default function DocPicker({ docs, folders, recurring, onPick, onPickFold
         {shownDocs.length === 0 && <p className="hint">{t('Không có tài liệu nào khớp.')}</p>}
         {shownDocs.map((d) => (
           <button key={d.path} className="row doc" title={d.rel} onClick={() => onPick(d.path, chosenScope)}>
-            <span className={`kind kind-${d.kind}`}>{kindLabel(d.kind)}</span>
+            <span className={`kind kind-${d.kind}`}>{kindLabel(d.kind, d.path)}</span>
             <span className="row-title">{d.title}</span>
             <span className="row-time">{d.rel}</span>
           </button>

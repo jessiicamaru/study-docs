@@ -5,7 +5,9 @@ import { createHash, randomBytes } from 'node:crypto'
 import { promises as fs, readFileSync, watch, type FSWatcher } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { Annotation, DocEntry, DocMeta, HtmlBlockEdit, LibrarySnapshot, OcrData, RecoveryItem, UiSettings } from '../shared/types'
+import type { Annotation, DocEntry, DocMeta, HtmlBlockEdit, LibrarySnapshot, OcrData, RecoveryItem, SheetData, SheetSave, UiSettings } from '../shared/types'
+import { applyXlsxEdits, loadSheet, parseCsv, SheetError, writeCsv } from './sheet'
+import { decodeText } from '../shared/text'
 import { applyHtmlEdits, editModeInjection, HtmlEditError } from './html-edit'
 import { withReadingStyle } from './page-style'
 import { printNotesInjection, viewModeInjection } from './view-helper'
@@ -1177,7 +1179,7 @@ function registerCalendarIpc(): void {
       title: t('Chọn tài liệu để gắn vào lịch'),
       properties: ['openFile', 'multiSelections'],
       filters: [
-        { name: t('Tài liệu'), extensions: ['md', 'markdown', 'html', 'htm', 'pdf', 'docx', 'txt', 'epub', 'mobi', 'azw3', 'azw'] },
+        { name: t('Tài liệu'), extensions: ['md', 'markdown', 'html', 'htm', 'pdf', 'docx', 'txt', 'csv', 'xlsx', 'epub', 'mobi', 'azw3', 'azw'] },
         { name: t('Ảnh'), extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif'] }
       ]
     })
@@ -1385,6 +1387,47 @@ async function writeDocChecked(rel: string, build: (current: string) => string, 
   return (await fs.stat(abs)).mtimeMs
 }
 
+/** Spreadsheets bigger than this are not opened in the app. */
+const MAX_SHEET_BYTES = 30 * 1024 * 1024
+
+/**
+ * Saves a spreadsheet: CSV rows (unchanged ones byte for byte) or XLSX cell edits. Like
+ * writeDocChecked, refused if the file changed since it was read; written through a temp file.
+ */
+async function saveSheet(rel: string, payload: SheetSave, expectedMtime: number): Promise<number> {
+  const abs = inLibrary(rel)
+  if (!abs || kindOf(abs) !== 'sheet') throw new Error(t('Không phải file CSV / XLSX.'))
+  const isXlsx = abs.toLowerCase().endsWith('.xlsx')
+  const stat = await fs.stat(abs)
+  if (Math.abs(stat.mtimeMs - expectedMtime) > 1) {
+    throw new Error(t('File vừa bị thay đổi bên ngoài app. Bài đã được tải lại; hãy sửa lại thay đổi của bạn.'))
+  }
+  const current = await fs.readFile(abs)
+  let content: Uint8Array | string
+  if (payload?.format === 'csv' && !isXlsx && Array.isArray(payload.rows)) {
+    const file = parseCsv(decodeUtf8Strict(current))
+    const rows = payload.rows.map((r) => ({
+      orig: Number.isInteger(r?.orig) && r.orig! >= 0 && r.orig! < file.rows.length ? r.orig : undefined,
+      cells: Array.isArray(r?.cells) ? r.cells.map((c) => String(c ?? '')) : []
+    }))
+    content = writeCsv(file, rows)
+  } else if (payload?.format === 'xlsx' && isXlsx && Array.isArray(payload.edits)) {
+    const edits = payload.edits.map((e) => ({ sheet: Number(e?.sheet), row: Number(e?.row), col: Number(e?.col), text: String(e?.text ?? '') }))
+    content = await applyXlsxEdits(current, edits)
+  } else {
+    throw new Error(t('Không phải file CSV / XLSX.'))
+  }
+  const tmp = path.join(path.dirname(abs), `.${path.basename(abs)}.studydocs-tmp`)
+  try {
+    await fs.writeFile(tmp, content)
+    await fs.rename(tmp, abs)
+  } catch (err) {
+    await fs.rm(tmp, { force: true })
+    throw friendlyWriteError(err)
+  }
+  return (await fs.stat(abs)).mtimeMs
+}
+
 /** Export to PDF: the page may draw itself, but not read other files or open connections. */
 /**
  * The hidden windows that print a page to PDF. A page there is not in the sandboxed iframe,
@@ -1572,7 +1615,7 @@ function registerIpc(): void {
       title: t('Mở tài liệu'),
       properties: ['openFile', 'multiSelections'],
       filters: [
-        { name: t('Tài liệu'), extensions: ['md', 'markdown', 'html', 'htm', 'pdf', 'docx', 'txt', 'epub', 'mobi', 'azw3', 'azw'] },
+        { name: t('Tài liệu'), extensions: ['md', 'markdown', 'html', 'htm', 'pdf', 'docx', 'txt', 'csv', 'xlsx', 'epub', 'mobi', 'azw3', 'azw'] },
         { name: t('Ảnh'), extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif'] }
       ]
     })
@@ -1773,6 +1816,34 @@ function registerIpc(): void {
     return writeDocChecked(rel, () => content, expectedMtime)
   })
 
+  // Spreadsheets (CSV, XLSX): read into a grid; saved with only the edited cells or rows changed.
+  ipcMain.handle('sheet:load', async (_e, rel: string): Promise<SheetData> => {
+    const abs = inLibrary(String(rel))
+    if (!abs || kindOf(abs) !== 'sheet') throw new Error(t('Không phải file CSV / XLSX.'))
+    const stat = await fs.stat(abs)
+    if (stat.size > MAX_SHEET_BYTES) throw new Error(t('File quá lớn để mở trong app (trên {0} MB); hãy mở bằng Excel.', { 0: MAX_SHEET_BYTES / 1024 / 1024 }))
+    try {
+      const data = await loadSheet(await fs.readFile(abs), path.extname(abs).toLowerCase(), path.basename(abs), (b) => {
+        try {
+          return { text: decodeUtf8Strict(b), editable: true }
+        } catch {
+          return { text: decodeText(b), editable: false }
+        }
+      })
+      return { ...data, mtime: stat.mtimeMs }
+    } catch (err) {
+      if (err instanceof SheetError) throw new Error(err.message)
+      throw err
+    }
+  })
+  ipcMain.handle('sheet:save', async (_e, rel: string, payload: SheetSave, expectedMtime: number) => {
+    try {
+      return await saveSheet(String(rel), payload, Number(expectedMtime))
+    } catch (err) {
+      if (err instanceof SheetError) throw new Error(err.message)
+      throw err
+    }
+  })
   ipcMain.handle('doc:saveHtmlEdits', async (_e, rel: string, edits: HtmlBlockEdit[], expectedMtime: number) => {
     if (kindOf(rel) !== 'html') throw new Error(t('Không phải file HTML'))
     try {
@@ -1862,6 +1933,20 @@ function createWindow(): void {
       }).then((answer) => answer === 0 && openInBrowser(url))
     }
     return { action: 'deny' }
+  })
+
+  // Tabs: Ctrl+W closes the open tab (not the window), Ctrl+Tab / Ctrl+Shift+Tab switch tabs;
+  // wherever the keyboard focus is, inside a page too.
+  webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !(input.control || input.meta) || input.alt) return
+    const key = input.key.toLowerCase()
+    if (key === 'w' && !input.shift) {
+      event.preventDefault()
+      webContents.send('nav:tab', 'close')
+    } else if (key === 'tab') {
+      event.preventDefault()
+      webContents.send('nav:tab', input.shift ? 'prev' : 'next')
+    }
   })
 
   // Back/forward buttons on the mouse (Windows sends them as "app commands").

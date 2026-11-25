@@ -37,7 +37,7 @@ interface Props {
   tagFilter: string | null
   onTagFilter: (t: string | null) => void
   selected: string | null
-  onOpen: (path: string) => void
+  onOpen: (path: string, newTab?: boolean) => void
   appInfo: AppInfo | null
   searchStatus: SearchStatus | null
   recentOpen: boolean
@@ -264,7 +264,7 @@ interface TreeProps {
   roots: RootInfo[]
   docs: DocEntry[]
   selected: string | null
-  onOpen: (p: string) => void
+  onOpen: (p: string, newTab?: boolean) => void
   onRemoveRoot: (key: string) => void
   sort: 'name' | 'modified'
   actions: { files: FileActions; openMenu: (e: React.MouseEvent, target: MenuItem) => void }
@@ -387,7 +387,7 @@ function LooseFiles({
   files: LibrarySnapshot['looseFiles']
   docs: DocEntry[]
   selected: string | null
-  onOpen: (p: string) => void
+  onOpen: (p: string, newTab?: boolean) => void
   onRemove: (path: string) => void
 }) {
   const byId = new Map(docs.map((d) => [d.path, d]))
@@ -524,7 +524,7 @@ function DocRow({
   doc: DocEntry
   depth: number
   selected: boolean
-  onOpen: (p: string) => void
+  onOpen: (p: string, newTab?: boolean) => void
   title?: string
   onMenu?: (e: React.MouseEvent) => void
 }) {
@@ -532,7 +532,10 @@ function DocRow({
     <button
       className={`row doc ${selected ? 'selected' : ''}`}
       style={{ paddingLeft: 10 + depth * 14 + 14 }}
-      onClick={() => onOpen(doc.path)}
+      // Ctrl+click or the middle button: in a new tab.
+      onClick={(e) => onOpen(doc.path, e.ctrlKey || e.metaKey)}
+      onMouseDown={(e) => e.button === 1 && e.preventDefault()}
+      onAuxClick={(e) => e.button === 1 && onOpen(doc.path, true)}
       onContextMenu={onMenu}
       title={title ?? doc.rel}
       data-depth={depth}
@@ -545,7 +548,7 @@ function DocRow({
         e.dataTransfer.effectAllowed = 'linkMove'
       }}
     >
-      <span className={`kind kind-${doc.kind}`}>{kindLabel(doc.kind)}</span>
+      <span className={`kind kind-${doc.kind}`}>{kindLabel(doc.kind, doc.path)}</span>
       <span className="row-title">{doc.title}</span>
     </button>
   )
@@ -555,7 +558,7 @@ interface SearchResultsProps {
   hits: SearchHit[]
   query: string
   selected: string | null
-  onOpen: (p: string) => void
+  onOpen: (p: string, newTab?: boolean) => void
   /** Folder names to show in front of the path, when the workspace has several folders. */
   rootNames: Record<string, string> | null
 }
@@ -571,7 +574,7 @@ function SearchResults({ hits, query, selected, onOpen, rootNames }: SearchResul
         return (
           <button key={doc.path} className={`hit ${selected === doc.path ? 'selected' : ''}`} onClick={() => onOpen(doc.path)}>
             <div className="hit-title">
-              <span className={`kind kind-${doc.kind}`}>{kindLabel(doc.kind)}</span>
+              <span className={`kind kind-${doc.kind}`}>{kindLabel(doc.kind, doc.path)}</span>
               {doc.title}
             </div>
             {folder && <div className="hit-path">{folder}</div>}
@@ -590,7 +593,7 @@ function SearchResults({ hits, query, selected, onOpen, rootNames }: SearchResul
 }
 
 /** Floating list of recently opened documents; closes on outside click or Escape. */
-function RecentPopover({ lib, selected, onOpen, onClose }: { lib: LibrarySnapshot | null; selected: string | null; onOpen: (p: string) => void; onClose: () => void }) {
+function RecentPopover({ lib, selected, onOpen, onClose }: { lib: LibrarySnapshot | null; selected: string | null; onOpen: (p: string, newTab?: boolean) => void; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const times = lib?.recent ?? {}
   const recent = (lib?.docs ?? [])
@@ -628,7 +631,7 @@ function RecentPopover({ lib, selected, onOpen, onClose }: { lib: LibrarySnapsho
             onClose()
           }}
         >
-          <span className={`kind kind-${d.kind}`}>{kindLabel(d.kind)}</span>
+          <span className={`kind kind-${d.kind}`}>{kindLabel(d.kind, d.path)}</span>
           <span className="row-title">{d.title}</span>
           <span className="row-time">{timeAgo(times[d.path])}</span>
         </button>

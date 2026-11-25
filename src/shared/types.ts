@@ -7,7 +7,7 @@ import type { CalDocRef, CalEventData, CalEventDetail, CalOccurrence, CalSubscri
  * PDF viewer; epub books are read (and annotated) with epub.js.
  */
 /** mobi = Kindle books (.mobi, .azw3, .azw), read like EPUB. */
-export type DocKind = 'md' | 'html' | 'pdf' | 'epub' | 'mobi' | 'docx' | 'txt' | 'image'
+export type DocKind = 'md' | 'html' | 'pdf' | 'epub' | 'mobi' | 'docx' | 'txt' | 'image' | 'sheet'
 
 /** How far along you are with a document. */
 export type StudyStatus = 'new' | 'learning' | 'review' | 'done'
@@ -174,6 +174,38 @@ export const DEFAULT_UI: UiSettings = {
 }
 
 /** One edited block of an HTML document: which element (by position) and its new inner HTML. */
+/** A cell of a spreadsheet as shown: its text, and what it holds. */
+export interface SheetCell {
+  text: string
+  kind: 'text' | 'number' | 'date' | 'bool' | 'formula' | 'error' | 'empty'
+}
+
+/** One sheet of a workbook (a CSV file has one). Rows may be shorter than `cols`. */
+export interface SheetTab {
+  name: string
+  rows: SheetCell[][]
+  cols: number
+  /** Only the first rows/columns are loaded. */
+  truncated: boolean
+  /** Why this sheet can only be read, if so. */
+  readOnly?: string
+}
+
+/** A CSV or XLSX file loaded for the grid. */
+export interface SheetData {
+  format: 'csv' | 'xlsx'
+  sheets: SheetTab[]
+  /** Modified time of the file when it was read (saving checks it). */
+  mtime: number
+  /** CSV: the delimiter found in the file. */
+  delimiter?: string
+}
+
+/** What the grid sends to save: CSV rows (with the file row each came from), or XLSX cell edits. */
+export type SheetSave =
+  | { format: 'csv'; rows: { orig?: number; cells: string[] }[] }
+  | { format: 'xlsx'; edits: { sheet: number; row: number; col: number; text: string }[] }
+
 export interface HtmlBlockEdit {
   /** Element child indexes from <html> down to the block, e.g. [1, 0, 3] = body > 1st child > 4th child. */
   path: number[]
@@ -231,6 +263,8 @@ export interface DocsApi {
   onNavigate(cb: (path: string, hash: string) => void): () => void
   /** Mouse back/forward buttons. */
   onHistory(cb: (direction: 'back' | 'forward') => void): () => void
+  /** Ctrl+W (close the tab), Ctrl+Tab / Ctrl+Shift+Tab (next / previous tab), from anywhere in the window. */
+  onTabKey(cb: (key: 'close' | 'next' | 'prev') => void): () => void
   /**
    * Asks where to save, then prints the document (md or html) to PDF, optionally with its
    * highlights and notes. Resolves with the file path, or null if cancelled.
@@ -292,6 +326,10 @@ export interface DocsApi {
   writeDoc(path: string, content: string, expectedMtime: number): Promise<number>
   /** Applies inline text edits to an HTML document without touching the rest of the file. */
   saveHtmlEdits(path: string, edits: HtmlBlockEdit[], expectedMtime: number): Promise<number>
+  /** A CSV or XLSX file as a grid. */
+  loadSheet(path: string): Promise<SheetData>
+  /** Saves grid edits; resolves with the new modified time. */
+  saveSheet(path: string, payload: SheetSave, expectedMtime: number): Promise<number>
 
   // ---------- files (only inside workspace folders) ----------
   /** Creates a note (.md or .html) in a folder (its id in the sidebar tree). Resolves with the note's id. */

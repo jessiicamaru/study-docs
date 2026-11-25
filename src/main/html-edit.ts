@@ -535,6 +535,172 @@ export function editModeInjection(nonce: string): string {
     send({ type: 'image', id, file })
   }
 
+
+  // ---------- pasting with formatting ----------
+  // Copied from a page (Chrome writes the formatting into style="" of spans), Word or Google
+  // Docs: bold, italic, underline, strike, code, links, sub/superscript and marks are kept;
+  // colours, fonts and sizes are not. Each block of what was copied (paragraph, heading, list
+  // item) becomes a block here. Only those tags are made, so nothing else gets in.
+  const PASTE_KEEP = { B: 'b', STRONG: 'b', I: 'i', EM: 'i', U: 'u', INS: 'u', S: 's', STRIKE: 's', DEL: 's', CODE: 'code', KBD: 'code', SAMP: 'code', SUB: 'sub', SUP: 'sup', MARK: 'mark' }
+  const PASTE_BLOCKS = new Set(['P','DIV','H1','H2','H3','H4','H5','H6','LI','BLOCKQUOTE','PRE','TR','DT','DD','SECTION','ARTICLE','HEADER','FOOTER','FIGCAPTION','ASIDE','MAIN','NAV','DETAILS','SUMMARY','ADDRESS'])
+  const PASTE_SKIP = new Set(['SCRIPT','STYLE','META','TITLE','HEAD','TEMPLATE','NOSCRIPT','BUTTON','INPUT','SELECT','TEXTAREA','IFRAME','OBJECT','EMBED','CANVAS','VIDEO','AUDIO','svg','SVG','MATH'])
+  const WS = new RegExp('[' + String.fromCharCode(32, 9, 10, 13, 160) + ']+', 'g')
+  const escHtml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const escAttr = (t) => escHtml(t).replace(/"/g, '&quot;')
+  /** Formatting given by style="" (Chrome copies the look of a page that way). */
+  const styleTags = (n) => {
+    const st = n.style
+    const out = []
+    if (!st) return out
+    const w = st.fontWeight
+    if (w === 'bold' || w === 'bolder' || Number(w) >= 600) out.push('b')
+    if (st.fontStyle === 'italic' || st.fontStyle === 'oblique') out.push('i')
+    const deco = (st.textDecorationLine || st.textDecoration || '')
+    if (deco.indexOf('underline') >= 0) out.push('u')
+    if (deco.indexOf('line-through') >= 0) out.push('s')
+    if (st.verticalAlign === 'super') out.push('sup')
+    if (st.verticalAlign === 'sub') out.push('sub')
+    return out
+  }
+  const safeHref = (h) => {
+    const v = (h || '').trim()
+    const low = v.toLowerCase()
+    if (!v || low.indexOf('javascript:') === 0 || low.indexOf('vbscript:') === 0 || low.indexOf('data:') === 0) return null
+    return v
+  }
+  /** What was copied, as blocks of clean inline HTML: [{ tag: 'p' | 'h2' | 'h3' | 'h4' | 'li', html }]. */
+  const pastedBlocks = (html) => {
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const out = []
+    let cur = null
+    const start = (tag) => {
+      cur = { tag: tag, parts: [] }
+      out.push(cur)
+    }
+    const add = (piece) => {
+      if (!cur) start('p')
+      cur.parts.push(piece)
+    }
+    const wrapped = (wrap, inner) => {
+      let open = ''
+      let close = ''
+      for (const w of wrap) {
+        if (w.indexOf('a ') === 0) {
+          open += '<a href="' + escAttr(w.slice(2)) + '">'
+          close = '</a>' + close
+        } else {
+          open += '<' + w + '>'
+          close = '</' + w + '>' + close
+        }
+      }
+      return open + inner + close
+    }
+    const walk = (node, wrap, pre) => {
+      for (const n of node.childNodes) {
+        if (n.nodeType === 3) {
+          const text = pre ? n.data : n.data.replace(WS, ' ')
+          if (!text || (!cur && !text.trim())) continue
+          add(wrapped(wrap, escHtml(text)))
+          continue
+        }
+        if (n.nodeType !== 1 || PASTE_SKIP.has(n.tagName)) continue
+        const tag = n.tagName.toUpperCase()
+        if (tag === 'BR') {
+          add('<br>')
+          continue
+        }
+        if (tag === 'IMG') {
+          const src = n.getAttribute('src') || ''
+          if (src.indexOf('data:image/') === 0) add('<img src="' + escAttr(src) + '" alt="' + escAttr(n.getAttribute('alt') || '') + '">')
+          continue
+        }
+        let w = wrap.slice()
+        for (const t of styleTags(n)) if (w.indexOf(t) < 0) w.push(t)
+        const keep = PASTE_KEEP[tag]
+        // Google Docs wraps everything in <b style="font-weight:normal">: not bold.
+        const notBold = (tag === 'B' || tag === 'STRONG') && n.style && (n.style.fontWeight === 'normal' || n.style.fontWeight === '400')
+        if (keep && !notBold && w.indexOf(keep) < 0) w.push(keep)
+        if (tag === 'A') {
+          const href = safeHref(n.getAttribute('href'))
+          if (href) w = w.filter((x) => x.indexOf('a ') !== 0).concat(['a ' + href])
+        }
+        if (tag === 'TD' || tag === 'TH') {
+          // Cells of a copied table: one line per row, cells apart.
+          if (cur && cur.parts.length) add(' ')
+          walk(n, w, pre)
+          continue
+        }
+        if (PASTE_BLOCKS.has(tag)) {
+          const kind = tag === 'H1' || tag === 'H2' ? 'h2' : tag === 'H3' ? 'h3' : tag === 'H4' || tag === 'H5' || tag === 'H6' ? 'h4' : tag === 'LI' ? 'li' : 'p'
+          start(kind)
+          walk(n, w, pre || tag === 'PRE')
+          cur = null
+          continue
+        }
+        walk(n, w, pre)
+      }
+    }
+    walk(doc.body, [], false)
+    return out
+      .map((b) => ({ tag: b.tag, html: b.parts.join('').replace(/^(<br>| )+|(<br>| )+$/g, '') }))
+      .filter((b) => b.html.replace(/<[^>]*>/g, '').trim() !== '' || b.html.indexOf('<img') >= 0)
+  }
+  /** Puts clean HTML at the caret (in the block it is in), the caret after it. */
+  const insertHtml = (html) => {
+    const sel = getSelection()
+    if (!sel.rangeCount) return
+    const range = sel.getRangeAt(0)
+    range.deleteContents()
+    const frag = range.createContextualFragment(html)
+    const last = frag.lastChild
+    range.insertNode(frag)
+    if (last) {
+      range.setStartAfter(last)
+      range.collapse(true)
+      sel.removeAllRanges()
+      sel.addRange(range)
+    }
+  }
+  /** Pastes what was copied with its formatting: the first block at the caret, the others as new blocks after this one. */
+  const pasteRich = (el, html) => {
+    const list = pastedBlocks(html)
+    if (!list.length) return false
+    if (list.length === 1 || !SPLITS.has(el.tagName)) {
+      // One block, or a place that holds one only (a table cell): lines kept apart by line breaks.
+      insertHtml(list.map((b) => b.html).join('<br>'))
+      changed()
+      return true
+    }
+    const sel = getSelection()
+    if (!sel.rangeCount) return false
+    const range = sel.getRangeAt(0)
+    range.deleteContents()
+    // What followed the caret goes to the end of the last pasted block.
+    const tail = document.createRange()
+    tail.setStart(range.endContainer, range.endOffset)
+    tail.setEnd(el, el.childNodes.length)
+    const rest = tail.extractContents()
+    el.insertAdjacentHTML('beforeend', list[0].html)
+    let prev = el
+    for (const b of list.slice(1)) {
+      // In a list, every block is an item; elsewhere items become paragraphs.
+      const tag = el.tagName === 'LI' ? 'li' : b.tag === 'li' ? 'p' : b.tag
+      const next = document.createElement(tag)
+      next.innerHTML = b.html
+      prev.after(next)
+      wire(next, true)
+      added.push(next)
+      prev = next
+    }
+    placeCaret(prev, true)
+    const caret = getSelection().getRangeAt(0).cloneRange()
+    prev.appendChild(rest)
+    getSelection().removeAllRanges()
+    getSelection().addRange(caret)
+    changed()
+    return true
+  }
+
   const wire = (el, isNew) => {
     el.setAttribute('data-sd-block', '')
     if (isNew) el.setAttribute('data-sd-new', '')
@@ -552,6 +718,9 @@ export function editModeInjection(nonce: string): string {
         askImage(image.getAsFile())
         return
       }
+      // Copied from a page, Word...: with its formatting.
+      const copied = (e.clipboardData && e.clipboardData.getData('text/html')) || ''
+      if (copied && pasteRich(el, copied)) return
       const text = (e.clipboardData && e.clipboardData.getData('text/plain')) || ''
       // One block = one paragraph: line breaks in pasted text become spaces.
       document.execCommand('insertText', false, text.split(String.fromCharCode(13)).join('').split(String.fromCharCode(10)).join(' '))

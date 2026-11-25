@@ -11,6 +11,7 @@ import { setLanguage, t } from '../../shared/i18n'
 import { ask, confirmDialog } from './lib/ask'
 import AskHost from './components/AskHost'
 import { setCurrentUi } from './lib/settings'
+import DocTabs from './components/DocTabs'
 import { requestWriting } from './lib/write-request'
 import CalendarView, { type CalendarFocus } from './components/CalendarView'
 import type { CalDocRef } from '../../shared/calendar'
@@ -35,6 +36,12 @@ interface Toast {
 export default function App() {
   const [lib, setLib] = useState<LibrarySnapshot | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  // Open tabs (document ids), kept between runs. Only the selected one is loaded; the others
+  // open again where you were reading (reading positions are kept per document).
+  const [tabs, setTabs] = useState<string[]>(() => loadLocal<string[]>('tabs:workspace', []))
+  useEffect(() => saveLocal('tabs:workspace', tabs), [tabs])
+  // The open document has unsaved edits (a dot on its tab).
+  const [unsaved, setUnsaved] = useState(false)
   const [scrollTarget, setScrollTarget] = useState<ScrollTarget>({ hash: '', n: 0 })
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -84,7 +91,9 @@ export default function App() {
       .getLibrary()
       .then((snap) => {
         setLib(snap)
-        setSelected(loadLocal<string | null>('selected:workspace', null))
+        const last = loadLocal<string | null>('selected:workspace', null)
+        setSelected(last)
+        if (last) setTabs((prev) => (prev.includes(last) ? prev : [...prev, last]))
       })
       .catch(notify)
     return window.api.onLibraryChanged(setLib)
@@ -138,6 +147,7 @@ export default function App() {
   // Closing the window with unsaved edits: the main process asks what to do.
   const setDirty = useCallback((dirty: boolean) => {
     dirtyRef.current = dirty
+    setUnsaved(dirty)
     window.api.setUnsaved(dirty)
     window.onbeforeunload = dirty
       ? (e) => {
@@ -186,7 +196,7 @@ export default function App() {
 
   /** Opens a document; returns false if you chose to stay because of unsaved edits. */
   const openDoc = useCallback(
-    async (path: string, hash = '', fromHistory = false): Promise<boolean> => {
+    async (path: string, hash = '', fromHistory = false, newTab = false): Promise<boolean> => {
       if (dirtyRef.current && path !== selected) {
         const yes = await confirmDialog({
           message: t('Bài đang mở có thay đổi chưa lưu. Chuyển bài và bỏ các thay đổi đó?'),
@@ -206,6 +216,16 @@ export default function App() {
           syncHistory()
         }
       }
+      // Its tab: already open, or this one shows it (a new one with Ctrl+click / middle button).
+      setTabs((prev) => {
+        if (prev.includes(path)) return prev
+        const at = selected ? prev.indexOf(selected) : -1
+        const next = prev.slice()
+        if (at < 0) next.push(path)
+        else if (newTab) next.splice(at + 1, 0, path)
+        else next[at] = path
+        return next
+      })
       setSelected(path)
       changeView('docs')
       setScrollTarget((t) => ({ hash, n: t.n + 1 }))
@@ -218,6 +238,62 @@ export default function App() {
     },
     [notify, selected, setDirty]
   )
+
+  /** Closes a tab; closing the open one shows the tab next to it (asks first if it has unsaved edits). */
+  const closeTab = useCallback(
+    async (path: string) => {
+      const i = tabs.indexOf(path)
+      if (i < 0) return
+      const rest = tabs.filter((p) => p !== path)
+      if (path === selected) {
+        const next = rest[i] ?? rest[i - 1]
+        if (next) {
+          if (!(await openDoc(next))) return
+        } else {
+          if (dirtyRef.current) {
+            const yes = await confirmDialog({
+              message: t('Bài đang mở có thay đổi chưa lưu. Đóng và bỏ các thay đổi đó?'),
+              ok: t('Bỏ thay đổi'),
+              cancel: t('Ở lại'),
+              danger: true
+            })
+            if (!yes) return
+            setDirty(false)
+          }
+          setSelected(null)
+          saveLocal('selected:workspace', null)
+        }
+      }
+      setTabs((prev) => prev.filter((p) => p !== path))
+    },
+    [tabs, selected, openDoc, setDirty]
+  )
+  // Ctrl+W, Ctrl+Tab, Ctrl+Shift+Tab (sent by the main process, from anywhere in the window).
+  useEffect(
+    () =>
+      window.api.onTabKey((key) => {
+        if (view !== 'docs') return
+        if (key === 'close') {
+          if (selected) void closeTab(selected)
+          return
+        }
+        if (!tabs.length) return
+        const i = selected ? tabs.indexOf(selected) : -1
+        const step = key === 'next' ? 1 : -1
+        const target = tabs[(i + step + tabs.length) % tabs.length] ?? tabs[0]
+        if (target !== selected) void openDoc(target)
+      }),
+    [tabs, selected, closeTab, openDoc, view]
+  )
+  // Tabs of documents that are gone (deleted, moved outside the app) close, once a scan is done.
+  useEffect(() => {
+    if (!lib || lib.scanning) return
+    const known = new Set(lib.docs.map((d) => d.path))
+    setTabs((prev) => {
+      const next = prev.filter((p) => known.has(p))
+      return next.length === prev.length ? prev : next
+    })
+  }, [lib])
 
   const goHistory = useCallback(
     (direction: 'back' | 'forward') => {
@@ -551,7 +627,7 @@ export default function App() {
         tagFilter={tagFilter}
         onTagFilter={setTagFilter}
         selected={selected}
-        onOpen={openDoc}
+        onOpen={(id, newTab) => void openDoc(id, '', false, newTab)}
         appInfo={appInfo}
         searchStatus={searchStatus}
         recentOpen={recentOpen}
@@ -595,6 +671,18 @@ export default function App() {
             </button>
           </div>
         ))}
+        {view === 'docs' && tabs.length > 0 && (
+          <DocTabs
+            tabs={tabs}
+            docs={lib?.docs ?? []}
+            selected={selected}
+            dirty={unsaved}
+            onSelect={(id) => void openDoc(id)}
+            onClose={(id) => void closeTab(id)}
+            onReorder={setTabs}
+            onOpenInNewTab={(id) => void openDoc(id, '', false, true)}
+          />
+        )}
         {view === 'calendar' ? (
           <CalendarView docs={docs} roots={lib?.roots ?? []} focus={calendarFocus} onOpenDoc={(id) => void openDoc(id)} onError={notify} onInfo={inform} />
         ) : current ? (
@@ -688,7 +776,7 @@ function Welcome({ hasLibrary, docs, recent, onChoose, onOpenFiles, onOpen }: We
           <div className="group-title">{t('Mở gần đây')}</div>
           {recentDocs.map((d) => (
             <button key={d.path} className="row doc" onClick={() => onOpen(d.path)} title={d.rel}>
-              <span className={`kind kind-${d.kind}`}>{kindLabel(d.kind)}</span>
+              <span className={`kind kind-${d.kind}`}>{kindLabel(d.kind, d.path)}</span>
               <span className="row-title">{d.title}</span>
               <span className="row-time">{timeAgo(recent[d.path])}</span>
             </button>

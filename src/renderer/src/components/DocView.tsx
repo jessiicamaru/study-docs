@@ -13,6 +13,7 @@ import EpubView from './EpubView'
 import PdfView from './PdfView'
 import ArticleView from './ArticleView'
 import ImageView from './ImageView'
+import SheetView from './SheetView'
 import FindBar from './FindBar'
 import { HighlightToolbar, NotePopover, NotesPanel } from './Annotations'
 import { newAnnotationId, type OutlineItem, type ReaderHandle, type ScreenRect, type TextSelection } from './reader'
@@ -289,6 +290,8 @@ export default function DocView(props: Props) {
       <ArticleView {...readerProps} doc={doc} onError={onError} />
     ) : doc.kind === 'image' ? (
       <ImageView {...readerProps} doc={doc} onError={onError} />
+    ) : doc.kind === 'sheet' ? (
+      <SheetView doc={doc} onError={onError} onInfo={props.onInfo} onDirty={updateDirty} />
     ) : doc.kind === 'epub' || doc.kind === 'mobi' ? (
       <EpubView {...readerProps} doc={doc} onError={onError} />
     ) : doc.kind === 'html' ? (
@@ -455,8 +458,8 @@ export default function DocView(props: Props) {
             </div>
             <TagEditor tags={meta.tags} allTags={props.allTags} onChange={(tags) => onUpdateMeta({ tags })} />
             <div className="spacer" />
-            <button className={`btn ${showOutline ? 'active' : ''}`} onClick={toggleOutline} disabled={mode !== 'view'} title={t('Hiện/ẩn mục lục và ghi chú')}>{t('Mục lục')}{annotations.length > 0 && t(' · {0} ghi chú', { 0: annotations.length })}
-            </button>
+            {doc.kind !== 'sheet' && <button className={`btn ${showOutline ? 'active' : ''}`} onClick={toggleOutline} disabled={mode !== 'view'} title={t('Hiện/ẩn mục lục và ghi chú')}>{t('Mục lục')}{annotations.length > 0 && t(' · {0} ghi chú', { 0: annotations.length })}
+            </button>}
             {doc.kind === 'md' && (
               <button className="btn primary-soft" onClick={() => setMode('write')} disabled={mode === 'raw'} title={t('Viết và định dạng bài (Markdown, xem trước ngay khi gõ)')}>
                 {t('Viết')}
@@ -495,9 +498,9 @@ export default function DocView(props: Props) {
           </div>
         </div>
       ) : (
-        <div className={`doc-body ${showOutline ? 'with-outline' : ''}`}>
+        <div className={`doc-body ${showOutline && doc.kind !== 'sheet' ? 'with-outline' : ''}`}>
           <div className="pane">{preview}</div>
-          {showOutline && (
+          {showOutline && doc.kind !== 'sheet' && (
             <nav className="outline" aria-label={t('Mục lục và ghi chú')}>
               <div className="panel-tabs" role="tablist">
                 <button role="tab" aria-selected={panelTab === 'outline'} className={panelTab === 'outline' ? 'active' : ''} onClick={() => showPanelTab('outline')}>{t('Mục lục')}</button>
@@ -537,7 +540,7 @@ export default function DocView(props: Props) {
         </div>
       )}
 
-      {findOpen && (mode === 'view' || (mode === 'edit' && doc.kind === 'html')) && <FindBar reader={readerRef} focusKey={findFocus} onClose={() => setFindOpen(false)} />}
+      {findOpen && doc.kind !== 'sheet' && (mode === 'view' || (mode === 'edit' && doc.kind === 'html')) && <FindBar reader={readerRef} focusKey={findFocus} onClose={() => setFindOpen(false)} />}
       {selection && mode === 'view' && (
         <HighlightToolbar rect={selection.rect} onPick={(c) => void createHighlight(c, false)} onNote={() => void createHighlight('yellow', true)} />
       )}

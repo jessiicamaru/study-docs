@@ -1,6 +1,6 @@
 # Study Docs
 
-A Windows app for reading and organising study documents: Markdown, HTML, PDF, Word, plain text, EPUB and Kindle books, and pictures. Tags, study status, highlights and notes for every document; full-text search that ignores Vietnamese accents; a calendar of classes, each linked to its documents and notes. The interface is in English or Vietnamese.
+A Windows app for reading and organising study documents: Markdown, HTML, PDF, Word, plain text, spreadsheets (CSV, XLSX), EPUB and Kindle books, and pictures. Tags, study status, highlights and notes for every document; full-text search that ignores Vietnamese accents; a calendar of classes, each linked to its documents and notes. The interface is in English or Vietnamese.
 
 Built with Electron + React + TypeScript (electron-vite).
 
@@ -30,6 +30,7 @@ node scripts/make-sample-docx.mjs  # rebuild sample-library/frontend/CSS Flexbox
 | `Ctrl+F` | Find in the open document (Markdown, HTML, PDF, Word, text, a whole EPUB/Kindle book), accents optional. `Enter` / `Shift+Enter` for next / previous, `Esc` to close. |
 | `Ctrl+E` or the clock icon | Recently opened documents |
 | `↑` `↓` `Enter` `←` `→` in the document list | Move, open, fold/unfold folders. Settings can order documents by name or by last change. |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab`, `Ctrl+W` | Next / previous tab, close the tab |
 | `Alt+←` / `Alt+→`, the ‹ › buttons, mouse back/forward buttons | Go back / forward between documents |
 | **Outline** | Headings on the right; click to jump, the section being read is highlighted. The reading position of every document is remembered. |
 | **Select text** | Shows the highlight bar: 4 colours or **✎ Note**. Click a highlight to edit its note, change its colour or delete it. The **Notes** tab on the right lists every highlight, plus a **Document note** for the whole document. Notes are Markdown (`**bold**`, lists, `code`, links). |
@@ -44,7 +45,10 @@ node scripts/make-sample-docx.mjs  # rebuild sample-library/frontend/CSS Flexbox
 | **Write** (Markdown) | Write in a live-preview editor: headings look like headings, `**bold**` is bold, lists, `- [ ]` checkboxes (click to tick), quotes, code, links, images, **tables, formulas (`$…$`, `$$…$$`) and Mermaid diagrams** are drawn in place; the line (or block) with the cursor shows its Markdown, click a drawn block to edit it. Type **`/`** at the start of a line for a menu of headings, lists, to-dos, quotes, tables, code, formulas, diagrams, rules and pictures (type a few letters to narrow it, accents optional). `Ctrl+B` / `Ctrl+I` / `Ctrl+K` (link) / `Ctrl+E` (code), toolbar for headings, lists, quotes; Enter continues a list; `Ctrl+F` finds and replaces. What you type is exactly what is saved, **by itself a moment after you stop typing** (or `Ctrl+S`); **Done** saves and closes. New Markdown notes open here. |
 | **Edit text** (HTML) | Edit right on the page, including text in SVG diagrams (click it to get a text box): `Ctrl+B` / `Ctrl+I` / `Ctrl+U`, strikethrough, links (`Ctrl+K`), pictures; **Enter** starts a new paragraph or list item, `Shift+Enter` a line break; the **Paragraph type** menu turns a paragraph or list item you just added into a heading, a paragraph or a bulleted / numbered list (Enter on an empty item ends the list); the **⋮⋮** handle at the left of a block drags it up or down among its neighbours (list items, paragraphs, tables…); **Table** inserts a table (Tab moves between cells, Tab in the last cell adds a row); in any table, empty cells can be filled and the bar over it adds or deletes rows and columns, or the whole table; `Ctrl+F` finds. Only the blocks you changed or moved are written (cleaned of scripts); other layout changes go through Raw. `Ctrl+S` saves, `Esc` cancels. Works on any HTML page, not only notes made in the app. New HTML notes open here. |
 | Look of HTML notes | HTML notes made with **New note** use the app's note style: headings with a touch of colour, tables as cards, tinted code and quotes, in your accent colour, light or dark. The style is also written into the note, so it looks right outside the app; in the app the current style is always shown, so older notes (including ones made with the first, plainer template) follow it. Bare HTML pages without CSS get it too. Imported pages with CSS of their own are left as they are. Showing a page never changes its file. |
+| Tabs | Documents open in tabs over the page. A click in the sidebar shows the document in the open tab (or goes to its tab if it has one); **Ctrl+click**, the middle button, or dragging it onto the tab bar opens a new tab. Only the open tab is loaded; the others come back where you were reading. Drag tabs to reorder; middle click or × closes. Tabs are kept between runs. |
+| Pasting copied text (`Ctrl+V`, HTML editing) | Text copied from a web page, Word or Google Docs keeps its **bold**, *italic*, underline, strikethrough, `code`, links, sub/superscript and highlights, and its paragraphs and headings become blocks here. Colours, fonts and sizes are left out, as are scripts and handlers. |
 | Pasting pictures (`Ctrl+V`) | In the editor, Raw and HTML editing. Pictures are shrunk to 1600 px wide and compressed (WebP), then **embedded in the file** (base64), so a note always carries its pictures; Raw shows a small label instead of the base64 text. Settings → Library → **Pasted images** can save them in an `assets/` folder next to the note instead; a picture still over 2 MB asks first. |
+| Spreadsheets (CSV, XLSX) | Open as a grid (sheet tabs for XLSX). Edit a cell with Enter, F2 or by typing; Enter goes down, Tab right, Esc cancels; Delete clears; a block copied from Excel can be pasted. CSV files can also get or lose rows and columns. Formulas are not calculated: a formula cell shows the result Excel saved and is read-only. Saving changes only what you edited: unchanged CSV rows stay byte for byte (delimiter, quotes, BOM, line endings kept); in an XLSX only the edited cells change (their style kept), and Excel recalculates formulas when it opens the file. Cell text is searchable. |
 | **Raw** | Open the source next to the document to change layout, diagrams, HTML tags… Markdown previews as you type; HTML updates when you save (`Ctrl+S`). |
 | `Ctrl+,` or the gear icon | Settings, in tabs: **Appearance** (language, light/dark, accent colour), **Reading** (Markdown text size, font and width; one or two book pages), **Library** (folders, sidebar order, pictures), **Data** (backup and restore, tags across the workspace, clean-up, recovery), **Updates**. |
 
@@ -141,6 +145,7 @@ Uninstalling: double-click `uninstall.bat`. It closes the app, uninstalls it, th
 | `src/main/pdf-text.ts`, `mobi-text.ts` | Text of PDFs (pdf.js) and Kindle books for search, in the search thread |
 | `src/main/zip.ts` | Reads single files out of a zip/EPUB/docx without loading all of it |
 | `src/main/scan-cache.ts` | Remembers names + hashes between runs, so big folders open fast |
+| `src/main/sheet.ts` | CSV and XLSX: reading into a grid, writing edited cells/rows back in place (JSZip) |
 | `src/main/html-edit.ts` | Editing HTML text: script added to the page while editing, and writing back in place (parse5) |
 | `src/main/page-style.ts` | Style of HTML notes (written into new notes, shown live in the app) and of bare HTML pages |
 | `src/main/view-helper.ts` | Small script added to HTML pages while reading: outline, reading position, shortcuts, find |
@@ -154,6 +159,7 @@ Uninstalling: double-click `uninstall.bat`. It closes the app, uninstalls it, th
 | `src/renderer/src/components/DocView.tsx` | Header (status, tags), view / edit text / raw modes, outline and notes panel |
 | `src/renderer/src/components/reader.ts` | What every document view provides (outline, position, highlights, find) |
 | `src/renderer/src/components/MarkdownView.tsx` | Markdown + Mermaid + code colours + KaTeX, links, editing text |
+| `src/renderer/src/components/SheetView.tsx` | The spreadsheet grid: editing cells, CSV rows/columns, sheet tabs |
 | `src/renderer/src/components/HtmlView.tsx` | Iframe for HTML documents, talks to the page scripts |
 | `src/renderer/src/components/PdfView.tsx` | PDFs with pdf.js: pages drawn on demand, text layer, zoom |
 | `src/renderer/src/components/EpubView.tsx` | EPUB (and converted Kindle) books with epub.js |

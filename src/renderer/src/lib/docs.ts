@@ -117,7 +117,8 @@ export function saveLocal(key: string, value: unknown): void {
 }
 
 /** Short badge text for a document type. */
-export function kindLabel(kind: DocEntry['kind']): string {
+export function kindLabel(kind: DocEntry['kind'], path?: string): string {
+  if (kind === 'sheet') return path?.toLowerCase().endsWith('.csv') ? 'CSV' : 'XLSX'
   return kind === 'image' ? t('ẢNH') : kind.toUpperCase()
 }
 
