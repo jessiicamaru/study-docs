@@ -314,9 +314,15 @@ export default function DocView(props: Props) {
       onReading(y, active)
     },
     onReady,
-    onSelection: setSelection,
+    // A click in the document reports the selection (or none) – that also closes the
+    // translation, whose own outside-click check can't see clicks inside the page's frame.
+    onSelection: (sel: TextSelection | null) => {
+      setSelection(sel)
+      setTranslation(null)
+    },
     onAnnotationClick: (id: string, rect: ScreenRect) => {
       setSelection(null)
+      setTranslation(null)
       setNoteEditor({ id, rect })
     },
     onAnchored: setMissing
