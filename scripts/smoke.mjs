@@ -2039,6 +2039,34 @@ try {
   check((await tabCount()) === before && (await page.locator('.doc-tab-name', { hasText: 'Event Sourcing' }).count()) === 0, 'Ctrl+W closes the tab and shows the one next to it (the window stays open)')
   check(JSON.parse(await page.evaluate(() => localStorage.getItem('tabs:workspace'))).length === before, 'the tabs are kept for the next start')
 
+  step('43. Selected text is translated; "Highlight + ghi chú" keeps the translation as the highlight\'s note')
+  // No network here: Google Translate is replaced by a stand-in.
+  await app.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('translate')
+    ipcMain.handle('translate', (_e, text, to) => ({ text: `[${to}] ${text}`, from: 'en', to, cut: false }))
+  })
+  writeFileSync(file('Dịch thử.md'), '# Dịch thử\n\nA cache stores copies of data.\n')
+  await page.waitForSelector('.doc-list .row.doc >> text=Dịch thử', { timeout: 10000 })
+  await openDoc('Dịch thử')
+  await page.waitForSelector('.markdown p')
+  await page.waitForTimeout(600)
+  const para = await page.locator('.markdown p').first().boundingBox()
+  await page.mouse.move(para.x + 1, para.y + para.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(para.x + para.width - 2, para.y + para.height / 2, { steps: 6 })
+  await page.mouse.up()
+  await page.click('.hl-translate-btn')
+  await page.waitForSelector('.translate-popover .translate-text:not(.loading)')
+  check((await page.textContent('.translate-text')) === '[vi] A cache stores copies of data.', 'the selected text is translated into Vietnamese')
+  await page.click('.translate-actions >> text=Highlight + ghi chú')
+  await page.waitForTimeout(500)
+  const translated = await page.evaluate(async () => {
+    const lib = await window.api.getLibrary()
+    const id = lib.docs.find((d) => d.rel === 'Dịch thử.md').path
+    return (lib.notes[id] ?? [])[0]
+  })
+  check(translated?.quote === 'A cache stores copies of data.' && translated?.note === '[vi] A cache stores copies of data.', 'the text is highlighted with the translation as its note')
+
   check(errors.length === 0, `no console errors${errors.length ? ': ' + errors.join(' | ') : ''}`)
 } catch (err) {
   console.error(err)

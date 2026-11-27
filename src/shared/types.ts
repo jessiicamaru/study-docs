@@ -174,6 +174,17 @@ export const DEFAULT_UI: UiSettings = {
 }
 
 /** One edited block of an HTML document: which element (by position) and its new inner HTML. */
+/** A translation of selected text. */
+export interface TranslateResult {
+  text: string
+  /** Language found in the selected text ("en", "vi", ...). */
+  from: string
+  /** Language it was translated into. */
+  to: 'vi' | 'en'
+  /** The selection was longer than what is translated at once; only its start was. */
+  cut: boolean
+}
+
 /** A cell of a spreadsheet as shown: its text, and what it holds. */
 export interface SheetCell {
   text: string
@@ -328,6 +339,8 @@ export interface DocsApi {
   writeDoc(path: string, content: string, expectedMtime: number): Promise<number>
   /** Applies inline text edits to an HTML document without touching the rest of the file. */
   saveHtmlEdits(path: string, edits: HtmlBlockEdit[], expectedMtime: number): Promise<number>
+  /** Translates selected text with Google Translate (only that text is sent). */
+  translate(text: string, to: 'vi' | 'en'): Promise<TranslateResult>
   /** A CSV or XLSX file as a grid. */
   loadSheet(path: string): Promise<SheetData>
   /** Saves grid edits; resolves with the new modified time. */

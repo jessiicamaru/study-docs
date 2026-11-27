@@ -7,6 +7,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { Annotation, DocEntry, DocMeta, HtmlBlockEdit, LibrarySnapshot, OcrData, RecoveryItem, SheetData, SheetSave, UiSettings } from '../shared/types'
 import { applyXlsxEdits, loadSheet, parseCsv, SheetError, writeCsv } from './sheet'
+import { translateText } from './translate'
 import { decodeText } from '../shared/text'
 import { applyHtmlEdits, editModeInjection, HtmlEditError } from './html-edit'
 import { withReadingStyle } from './page-style'
@@ -1816,6 +1817,10 @@ function registerIpc(): void {
     return writeDocChecked(rel, () => content, expectedMtime)
   })
 
+  // Selected text, translated with Google Translate (only that text is sent).
+  ipcMain.handle('translate', (_e, text: string, to: string) =>
+    translateText(String(text ?? ''), to === 'en' ? 'en' : 'vi', (url, init) => net.fetch(url, init))
+  )
   // Spreadsheets (CSV, XLSX): read into a grid; saved with only the edited cells or rows changed.
   ipcMain.handle('sheet:load', async (_e, rel: string): Promise<SheetData> => {
     const abs = inLibrary(String(rel))

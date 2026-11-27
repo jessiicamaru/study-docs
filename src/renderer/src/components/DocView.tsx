@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Annotation, DocEntry, DocMeta, HighlightColor } from '../../../shared/types'
-import { loadLocal, saveLocal, STATUSES } from '../lib/docs'
+import type { Annotation, DocEntry, DocMeta, HighlightColor, TranslateResult } from '../../../shared/types'
+import { errorMessage, loadLocal, saveLocal, STATUSES } from '../lib/docs'
 import type { ScrollTarget } from '../App'
 import HtmlView from './HtmlView'
 import MarkdownView from './MarkdownView'
@@ -15,7 +15,7 @@ import ArticleView from './ArticleView'
 import ImageView from './ImageView'
 import SheetView from './SheetView'
 import FindBar from './FindBar'
-import { HighlightToolbar, NotePopover, NotesPanel } from './Annotations'
+import { HighlightToolbar, NotePopover, NotesPanel, TranslatePopover } from './Annotations'
 import { newAnnotationId, type OutlineItem, type ReaderHandle, type ScreenRect, type TextSelection } from './reader'
 import { t } from '../../../shared/i18n'
 import { normalize } from '../../../shared/text'
@@ -215,26 +215,41 @@ export default function DocView(props: Props) {
   )
 
   /** Turns the current selection into a highlight; optionally opens its note right away. */
-  const createHighlight = async (color: HighlightColor, openNote: boolean): Promise<void> => {
-    if (!selection) return
+  const createHighlight = async (color: HighlightColor, openNote: boolean, from: TextSelection | null = selection, note = ''): Promise<void> => {
+    const sel = from
+    if (!sel) return
     const now = Date.now()
     const a: Annotation = {
       id: newAnnotationId(),
       color,
-      note: '',
-      quote: selection.quote,
-      prefix: selection.prefix,
-      suffix: selection.suffix,
-      ...(selection.cfi ? { cfi: selection.cfi } : {}),
-      ...(selection.page ? { page: selection.page } : {}),
+      note,
+      quote: sel.quote,
+      prefix: sel.prefix,
+      suffix: sel.suffix,
+      ...(sel.cfi ? { cfi: sel.cfi } : {}),
+      ...(sel.page ? { page: sel.page } : {}),
       created: now,
       updated: now
     }
-    const rect = selection.rect
+    const rect = sel.rect
     setSelection(null)
     readerRef.current?.clearSelection()
     if ((await saveAnnotation(a)) && openNote) setNoteEditor({ id: a.id, rect })
   }
+
+  // ---------- translating the selected text ----------
+  const [translation, setTranslation] = useState<{ sel: TextSelection; loading: boolean; result: TranslateResult | null; error: string | null } | null>(null)
+  const translate = async (sel: TextSelection, to: 'vi' | 'en'): Promise<void> => {
+    setTranslation({ sel, loading: true, result: null, error: null })
+    saveLocal('translate-to', to)
+    try {
+      const result = await window.api.translate(sel.quote, to)
+      setTranslation((cur) => (cur && cur.sel === sel ? { sel, loading: false, result, error: null } : cur))
+    } catch (err) {
+      setTranslation((cur) => (cur && cur.sel === sel ? { sel, loading: false, result: null, error: errorMessage(err) } : cur))
+    }
+  }
+  const closeTranslation = useCallback(() => setTranslation(null), [])
 
   const deleteAnnotation = async (id: string): Promise<void> => {
     setNoteEditor(null)
@@ -541,8 +556,29 @@ export default function DocView(props: Props) {
       )}
 
       {findOpen && doc.kind !== 'sheet' && (mode === 'view' || (mode === 'edit' && doc.kind === 'html')) && <FindBar reader={readerRef} focusKey={findFocus} onClose={() => setFindOpen(false)} />}
-      {selection && mode === 'view' && (
-        <HighlightToolbar rect={selection.rect} onPick={(c) => void createHighlight(c, false)} onNote={() => void createHighlight('yellow', true)} />
+      {selection && mode === 'view' && !translation && (
+        <HighlightToolbar
+          rect={selection.rect}
+          onPick={(c) => void createHighlight(c, false)}
+          onNote={() => void createHighlight('yellow', true)}
+          onTranslate={() => void translate(selection, loadLocal<'vi' | 'en'>('translate-to', 'vi'))}
+        />
+      )}
+      {translation && (
+        <TranslatePopover
+          rect={translation.sel.rect}
+          quote={translation.sel.quote}
+          loading={translation.loading}
+          result={translation.result}
+          error={translation.error}
+          onOtherWay={() => void translate(translation.sel, translation.result?.to === 'en' ? 'vi' : 'en')}
+          onKeep={() => {
+            const { sel, result } = translation
+            setTranslation(null)
+            if (result) void createHighlight('blue', false, sel, result.text).then(() => onInfo(t('Đã thêm bản dịch vào ghi chú.')))
+          }}
+          onClose={closeTranslation}
+        />
       )}
       {editedAnnotation && noteEditor && (
         <NotePopover

@@ -1,10 +1,11 @@
 // Highlight UI shared by every document type:
-//  - HighlightToolbar: appears above selected text (colours + "Ghi chú")
+//  - HighlightToolbar: appears above selected text (colours + "Ghi chú" + "Dịch")
+//  - TranslatePopover: the translation of the selected text (Google Translate), to copy or keep as a note
 //  - NotePopover: edit a highlight's note / colour, or delete it
 //  - NotesPanel: list of a document's highlights in the side panel
 
 import { useEffect, useRef, useState } from 'react'
-import type { Annotation, HighlightColor } from '../../../shared/types'
+import type { Annotation, HighlightColor, TranslateResult } from '../../../shared/types'
 import type { ScreenRect } from './reader'
 import { renderNote } from '../lib/note-md'
 import { t } from '../../../shared/i18n'
@@ -35,13 +36,15 @@ function placeNear(rect: ScreenRect, width: number, height: number): { left: num
 export function HighlightToolbar({
   rect,
   onPick,
-  onNote
+  onNote,
+  onTranslate
 }: {
   rect: ScreenRect
   onPick: (color: HighlightColor) => void
   onNote: () => void
+  onTranslate?: () => void
 }) {
-  const pos = placeNear(rect, 230, 40)
+  const pos = placeNear(rect, onTranslate ? 290 : 230, 40)
   return (
     <div className="hl-toolbar" style={pos} role="toolbar" aria-label="Highlight" onMouseDown={(e) => e.preventDefault()}>
       {HIGHLIGHT_COLORS.map((c) => (
@@ -49,6 +52,91 @@ export function HighlightToolbar({
       ))}
       <span className="hl-sep" />
       <button className="hl-note-btn" onClick={onNote}>{t('✎ Ghi chú')}</button>
+      {onTranslate && (
+        <button className="hl-note-btn hl-translate-btn" onClick={onTranslate} title={t('Dịch đoạn này (Google Dịch)')}>
+          {t('文A Dịch')}
+        </button>
+      )}
+    </div>
+  )
+}
+
+const LANG_NAMES: Record<string, string> = { vi: 'Tiếng Việt', en: 'Tiếng Anh', fr: 'Tiếng Pháp', de: 'Tiếng Đức', ja: 'Tiếng Nhật', ko: 'Tiếng Hàn', 'zh-CN': 'Tiếng Trung', zh: 'Tiếng Trung', es: 'Tiếng Tây Ban Nha', ru: 'Tiếng Nga' }
+const langName = (code: string): string => (LANG_NAMES[code] ? t(LANG_NAMES[code]) : code.toUpperCase())
+
+/**
+ * The translation of selected text. Copy it, translate the other way, or keep it: the text is
+ * highlighted and the translation becomes the highlight's note.
+ */
+export function TranslatePopover({
+  rect,
+  quote,
+  loading,
+  result,
+  error,
+  onOtherWay,
+  onKeep,
+  onClose
+}: {
+  rect: ScreenRect
+  quote: string
+  loading: boolean
+  result: TranslateResult | null
+  error: string | null
+  onOtherWay: () => void
+  onKeep: () => void
+  onClose: () => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [copied, setCopied] = useState(false)
+  const pos = placeNear(rect, 380, 240)
+  useEffect(() => {
+    const onDown = (e: MouseEvent): void => {
+      if (!ref.current?.contains(e.target as Node)) onClose()
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+  return (
+    <div className="translate-popover" style={pos} ref={ref} role="dialog" aria-label={t('Bản dịch')}>
+      <div className="translate-head">
+        <span>{result ? `${langName(result.from)} → ${langName(result.to)}` : t('Đang dịch…')}</span>
+        <span className="translate-by">Google Dịch</span>
+      </div>
+      <div className="translate-quote" title={quote}>{quote}</div>
+      <div className={`translate-text ${loading ? 'loading' : ''}`}>
+        {loading ? <span className="translate-dots"><i /><i /><i /></span> : error ? <span className="translate-error">{error}</span> : result?.text}
+      </div>
+      {result?.cut && <div className="translate-note">{t('Đoạn chọn quá dài: chỉ phần đầu được dịch.')}</div>}
+      <div className="translate-actions">
+        <button
+          className="btn small"
+          disabled={!result}
+          onClick={() => {
+            if (!result) return
+            void navigator.clipboard.writeText(result.text).then(() => {
+              setCopied(true)
+              setTimeout(() => setCopied(false), 1500)
+            })
+          }}
+        >
+          {copied ? t('Đã chép ✓') : t('Chép')}
+        </button>
+        <button className="btn small" disabled={loading} onClick={onOtherWay} title={t('Dịch sang ngôn ngữ kia')}>
+          {result?.to === 'en' ? t('→ Tiếng Việt') : t('→ Tiếng Anh')}
+        </button>
+        <span className="spacer" />
+        <button className="btn primary small" disabled={!result} onClick={onKeep} title={t('Highlight đoạn này, bản dịch thành ghi chú của nó')}>
+          {t('Highlight + ghi chú')}
+        </button>
+      </div>
     </div>
   )
 }

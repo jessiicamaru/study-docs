@@ -55,6 +55,7 @@ const api: DocsApi = {
   writeDoc: (path, content, expectedMtime) => ipcRenderer.invoke('doc:write', path, content, expectedMtime),
   saveHtmlEdits: (path, edits, expectedMtime) => ipcRenderer.invoke('doc:saveHtmlEdits', path, edits, expectedMtime),
   loadSheet: (path) => ipcRenderer.invoke('sheet:load', path),
+  translate: (text, to) => ipcRenderer.invoke('translate', text, to),
   saveSheet: (path, payload, expectedMtime) => ipcRenderer.invoke('sheet:save', path, payload, expectedMtime),
   newNote: (folderId, name, kind) => ipcRenderer.invoke('fs:newNote', folderId, name, kind),
   newFolder: (folderId, folderName, noteName, kind) => ipcRenderer.invoke('fs:newFolder', folderId, folderName, noteName, kind),
