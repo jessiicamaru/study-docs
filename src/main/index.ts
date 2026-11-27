@@ -2,7 +2,7 @@
 
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, Notification, protocol, session, shell } from 'electron'
 import { createHash, randomBytes } from 'node:crypto'
-import { promises as fs, readFileSync, watch, type FSWatcher } from 'node:fs'
+import { existsSync, promises as fs, readFileSync, watch, type FSWatcher } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { Annotation, Bookmark, DocEntry, DocMeta, HtmlBlockEdit, LibrarySnapshot, OcrData, RecoveryItem, SheetData, SheetSave, UiSettings } from '../shared/types'
@@ -214,7 +214,7 @@ async function snapshot(): Promise<LibrarySnapshot> {
       for (const file of (await s?.backups()) ?? []) recovery.push({ root: r.key, rootName: r.name, store, file })
     }
     // Only count once the folder is fully scanned and reachable, or every file would look gone.
-    if (!scanning && !r.warning) orphans += storesOf(r).reduce((n, st) => n + st.orphans(knownPaths(r)).length, 0)
+    if (!scanning && !r.warning) orphans += storesOf(r).reduce((n, st) => n + st.orphans(keptPaths(r, st)).length, 0)
     for (const w of [r.meta?.warning, r.notes?.warning, r.warning]) if (w) warnings.push(roots.length > 1 ? `${r.name}: ${w}` : w)
   }
   if (calendar?.warning) warnings.push(calendar.warning)
@@ -246,6 +246,15 @@ const storesOf = (r: Root): (MetaStore | NotesStore)[] => [r.meta, r.notes].filt
  * file in the list even when it is missing right now (a USB drive that isn't plugged in).
  */
 const knownPaths = (r: Root): string[] => (r.loose ? r.files.map((f) => relOf(r, f)) : r.docs.map((d) => d.path))
+/**
+ * The entries a clean-up must keep. Next to loose files, a file taken off the list (×) is
+ * still on the disk: its notes come back when it is opened again, so they are not "left over".
+ */
+function keptPaths(r: Root, st: MetaStore | NotesStore): string[] {
+  const known = knownPaths(r)
+  if (!r.loose) return known
+  return [...known, ...st.orphans(known).filter((rel) => existsSync(path.join(r.path, rel)))]
+}
 
 /** The meta or notes store of a folder, for the recovery dialog. */
 function storeFor(rootKey: string, store: string): MetaStore | NotesStore {
@@ -1776,7 +1785,7 @@ function registerIpc(): void {
     try {
       for (const r of roots) {
         if (r.warning) continue // folder unreachable: its files only look missing
-        for (const st of storesOf(r)) n += await st.pruneOrphans(knownPaths(r))
+        for (const st of storesOf(r)) n += await st.pruneOrphans(keptPaths(r, st))
       }
     } catch (err) {
       throw friendlyWriteError(err)

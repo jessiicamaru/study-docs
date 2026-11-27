@@ -36,6 +36,29 @@ interface Toast {
 
 export default function App() {
   const [lib, setLib] = useState<LibrarySnapshot | null>(null)
+  /** Takes a file off "File lẻ". Its notes stay (in the app's data) – say so when it has some. */
+  const removeLoose = async (file: string): Promise<void> => {
+    // Read it fresh: notes written since the list was loaded aren't in \`lib\`.
+    const snap = await window.api.getLibrary().catch(() => lib)
+    const id = snap?.looseFiles.find((f) => f.path === file)?.id
+    const notes = id ? (snap?.notes[id]?.length ?? 0) : 0
+    const marks = id ? ((await window.api.bookmarks(id).catch(() => [])) ?? []).length : 0
+    const m = id ? snap?.meta[id] : undefined
+    const hasData = notes > 0 || marks > 0 || !!(id && snap?.docNotes[id]) || !!m?.tags.length || (!!m && m.status !== 'new')
+    if (hasData) {
+      const name = file.split(/[\\/]/).pop() ?? file
+      const yes = await confirmDialog({
+        message: t('Bỏ "{0}" khỏi danh sách?', { 0: name }),
+        detail:
+          (notes ? t('File có {0} highlight/ghi chú.', { 0: notes }) + ' ' : '') +
+          t('File không bị xoá, ghi chú, tag và dấu trang vẫn được giữ: mở lại đúng file này là thấy lại. Nếu đổi tên hoặc chuyển file đi chỗ khác thì ghi chú sẽ không tìm thấy.'),
+        ok: t('Bỏ khỏi danh sách'),
+        cancel: t('Huỷ')
+      })
+      if (!yes) return
+    }
+    window.api.removeLooseFile(file).catch(notify)
+  }
   const [selected, setSelected] = useState<string | null>(null)
   // Open tabs (document ids), kept between runs. Only the selected one is loaded; the others
   // open again where you were reading (reading positions are kept per document).
@@ -664,7 +687,7 @@ export default function App() {
         calendarOpen={view === 'calendar'}
         onToggleCalendar={() => (view === 'calendar' ? changeView('docs') : void showCalendar())}
         onOpenFiles={openFiles}
-        onRemoveLoose={(p) => window.api.removeLooseFile(p).catch(notify)}
+        onRemoveLoose={(p) => void removeLoose(p)}
         files={files}
         sort={ui.sidebarSort}
       />

@@ -93,9 +93,15 @@ export default function Sidebar(props: Props) {
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
-        <div className="library-name" title={roots.map((r) => r.path).join('\n')}>
-          {workspaceName}
+        <div className="sidebar-title">
+          <div className="library-name" title={roots.map((r) => r.path).join('\n')}>
+            {workspaceName}
+          </div>
+          <button className="icon-btn" title={t('Ẩn thanh bên (Ctrl+\\)')} aria-label={t('Ẩn thanh bên')} onClick={props.onHide}>
+            <PanelIcon />
+          </button>
         </div>
+        <div className="sidebar-tools">
         <button className="icon-btn" title={t('Mở file… (Ctrl+O)')} onClick={props.onOpenFiles}>
           <FilePlusIcon />
         </button>
@@ -116,9 +122,7 @@ export default function Sidebar(props: Props) {
         <button className="icon-btn" title={t('Cài đặt')} onClick={props.onOpenSettings}>
           <GearIcon />
         </button>
-        <button className="icon-btn" title={t('Ẩn thanh bên (Ctrl+\\)')} aria-label={t('Ẩn thanh bên')} onClick={props.onHide}>
-          <PanelIcon />
-        </button>
+        </div>
         {props.recentOpen && (
           <RecentPopover lib={lib} selected={selected} onOpen={onOpen} onClose={() => props.onRecentOpen(false)} />
         )}

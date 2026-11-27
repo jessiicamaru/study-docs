@@ -58,6 +58,11 @@ interface Props {
 
 const positionKey = (path: string): string => `pos:${path}`
 
+/** The outline/notes panel: its usual width is the narrowest it gets. */
+const PANEL_MIN = 240
+const PANEL_MAX = 640
+const clampPanel = (w: number): number => Math.min(PANEL_MAX, Math.max(PANEL_MIN, Number(w) || PANEL_MIN))
+
 export default function DocView(props: Props) {
   const { doc, meta, allDocs, scrollTarget, onUpdateMeta, onOpenDoc, onError, onInfo, onDirtyChange, rootName } = props
   const [mode, setMode] = useState<Mode>('view')
@@ -80,6 +85,36 @@ export default function DocView(props: Props) {
   const [noteEditor, setNoteEditor] = useState<{ id: string; rect: ScreenRect } | null>(null)
   const [missing, setMissing] = useState<string[]>([])
   const [panelTab, setPanelTab] = useState<'outline' | 'notes'>(() => loadLocal('panel-tab', 'outline'))
+  // The outline/notes panel: drag its left edge to widen it (its first width is the narrowest).
+  const [panelWidth, setPanelWidth] = useState(() => clampPanel(loadLocal('panel-width', PANEL_MIN)))
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const startPanelDrag = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    const handle = e.currentTarget
+    handle.setPointerCapture(e.pointerId) // keeps the drag going over the document's frame
+    const startX = e.clientX
+    const startW = panelWidth
+    const room = (bodyRef.current?.clientWidth ?? 1200) - 320 // leave the document some room
+    let w = startW
+    const move = (ev: PointerEvent): void => {
+      w = Math.min(clampPanel(startW + startX - ev.clientX), Math.max(PANEL_MIN, room))
+      setPanelWidth(w)
+    }
+    const up = (): void => {
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', up)
+      handle.removeEventListener('pointercancel', up)
+      saveLocal('panel-width', w)
+    }
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', up)
+    handle.addEventListener('pointercancel', up)
+  }
+  const resetPanel = (): void => {
+    setPanelWidth(PANEL_MIN)
+    saveLocal('panel-width', PANEL_MIN)
+  }
   const { annotations, onAnnotationsChange } = props
   /** md and html can be edited and exported; pdf and epub are read-only. */
   const canEdit = doc.kind === 'md' || doc.kind === 'html'
@@ -544,8 +579,24 @@ export default function DocView(props: Props) {
           </div>
         </div>
       ) : (
-        <div className={`doc-body ${showOutline && doc.kind !== 'sheet' ? 'with-outline' : ''}`}>
+        <div
+          ref={bodyRef}
+          className={`doc-body ${showOutline && doc.kind !== 'sheet' ? 'with-outline' : ''}`}
+          style={showOutline && doc.kind !== 'sheet' ? { gridTemplateColumns: `minmax(0, 1fr) ${panelWidth}px` } : undefined}
+        >
           <div className="pane">{preview}</div>
+          {showOutline && doc.kind !== 'sheet' && (
+            <div
+              className="panel-resizer"
+              style={{ right: panelWidth - 4 }}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t('Kéo để đổi độ rộng bảng bên')}
+              title={t('Kéo để đổi độ rộng (bấm đúp: về mặc định)')}
+              onPointerDown={startPanelDrag}
+              onDoubleClick={resetPanel}
+            />
+          )}
           {showOutline && doc.kind !== 'sheet' && (
             <nav className="outline" aria-label={t('Mục lục và ghi chú')}>
               <div className="panel-tabs" role="tablist">

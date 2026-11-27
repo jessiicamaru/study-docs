@@ -298,6 +298,10 @@ try {
   await docPathIs(ES)
   check((await page.getAttribute('iframe.html-frame', 'src')).endsWith('#s7'), 'HTML link opens the target doc at #s7')
   await openDoc('Lộ trình Backend')
+  // Wait for the page itself: the frame of the page before may still be there for a moment.
+  await docPathIs(ROADMAP)
+  await page.waitForFunction(() => document.querySelector('iframe.html-frame')?.src.includes('L%E1%BB%99%20tr%C3%ACnh'))
+  await page.waitForTimeout(300)
   await page.frameLocator('iframe.html-frame').locator('#link-react').click()
   await docPathIs(REACT)
   check(true, 'HTML link opens a Markdown doc')
