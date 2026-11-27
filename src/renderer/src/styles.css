@@ -1070,3 +1070,13 @@ dialog::backdrop { backdrop-filter: blur(3px); }
 @keyframes sd-blink { 50% { opacity: 1; transform: translateY(-2px); } }
 .hl-translate-btn { color: var(--accent); font-weight: 600; }
 .translate-head .translate-failed { color: #c24a4a; }
+
+/* ---------- hiding the sidebar (Ctrl+\) ---------- */
+.app.sidebar-hidden { grid-template-columns: 52px 1fr; }
+.app.sidebar-hidden > .sidebar { display: none; }
+.side-rail {
+  position: relative; z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 0;
+  background: var(--glass); backdrop-filter: blur(18px) saturate(1.3);
+  border-right: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  animation: sd-rise .2s var(--ease);
+}

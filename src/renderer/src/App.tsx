@@ -12,6 +12,7 @@ import { ask, confirmDialog } from './lib/ask'
 import AskHost from './components/AskHost'
 import { setCurrentUi } from './lib/settings'
 import DocTabs from './components/DocTabs'
+import { PanelIcon, SearchIcon } from './components/Sidebar'
 import { requestWriting } from './lib/write-request'
 import CalendarView, { type CalendarFocus } from './components/CalendarView'
 import type { CalDocRef } from '../../shared/calendar'
@@ -40,6 +41,12 @@ export default function App() {
   // open again where you were reading (reading positions are kept per document).
   const [tabs, setTabs] = useState<string[]>(() => loadLocal<string[]>('tabs:workspace', []))
   useEffect(() => saveLocal('tabs:workspace', tabs), [tabs])
+  // The sidebar can be hidden (Ctrl+\ or its button) for more room to read; remembered.
+  const [sidebarHidden, setSidebarHidden] = useState(() => loadLocal<boolean>('sidebar-hidden', false))
+  const showSidebar = useCallback((show: boolean) => {
+    setSidebarHidden(!show)
+    saveLocal('sidebar-hidden', !show)
+  }, [])
   // The open document has unsaved edits (a dot on its tab).
   const [unsaved, setUnsaved] = useState(false)
   const [scrollTarget, setScrollTarget] = useState<ScrollTarget>({ hash: '', n: 0 })
@@ -272,6 +279,10 @@ export default function App() {
   useEffect(
     () =>
       window.api.onTabKey((key) => {
+        if (key === 'sidebar') {
+          showSidebar(sidebarHidden)
+          return
+        }
         if (view !== 'docs') return
         if (key === 'close') {
           if (selected) void closeTab(selected)
@@ -283,7 +294,7 @@ export default function App() {
         const target = tabs[(i + step + tabs.length) % tabs.length] ?? tabs[0]
         if (target !== selected) void openDoc(target)
       }),
-    [tabs, selected, closeTab, openDoc, view]
+    [tabs, selected, closeTab, openDoc, view, sidebarHidden, showSidebar]
   )
   // Tabs of documents that are gone (deleted, moved outside the app) close, once a scan is done.
   useEffect(() => {
@@ -366,8 +377,12 @@ export default function App() {
   const runShortcut = useCallback(
     (key: string) => {
       if (key === 'ctrl+k' || key === 'ctrl+p') {
-        searchRef.current?.focus()
-        searchRef.current?.select()
+        // Search lives in the sidebar: show it first if it is hidden.
+        showSidebar(true)
+        requestAnimationFrame(() => {
+          searchRef.current?.focus()
+          searchRef.current?.select()
+        })
       } else if (key === 'ctrl+e') setRecentOpen((o) => !o)
       else if (key === 'ctrl+,') setSettingsOpen(true)
       else if (key === 'ctrl+o') void openFiles()
@@ -376,7 +391,7 @@ export default function App() {
       else if (key === 'ctrl+f') window.dispatchEvent(new Event('studydocs:find'))
       else if (key === 'back' || key === 'forward') goHistory(key)
     },
-    [goHistory, openFiles]
+    [goHistory, openFiles, showSidebar]
   )
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -614,8 +629,19 @@ export default function App() {
 
   return (
     // The whole window is drawn again when the language changes (texts come from t()).
-    <div className="app" key={ui.language}>
+    <div className={`app ${sidebarHidden ? 'sidebar-hidden' : ''}`} key={ui.language}>
+      {sidebarHidden && (
+        <nav className="side-rail" aria-label={t('Thanh bên đang ẩn')}>
+          <button className="icon-btn" title={t('Hiện thanh bên (Ctrl+\\)')} aria-label={t('Hiện thanh bên')} onClick={() => showSidebar(true)}>
+            <PanelIcon />
+          </button>
+          <button className="icon-btn" title={t('Tìm tài liệu (Ctrl+K)')} aria-label={t('Tìm tài liệu')} onClick={() => runShortcut('ctrl+k')}>
+            <SearchIcon />
+          </button>
+        </nav>
+      )}
       <Sidebar
+        onHide={() => showSidebar(false)}
         lib={lib}
         docs={visibleDocs}
         hits={hits}

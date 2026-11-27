@@ -86,6 +86,67 @@ const css = (name: string): string => getComputedStyle(document.documentElement)
 
 /** Settings > Đọc sách: "none" = always one page; "auto" = two pages when the book area is wide. */
 const spreadSetting = (): 'none' | 'auto' => (document.documentElement.dataset.epubSpread === 'single' ? 'none' : 'auto')
+
+/**
+ * Lights up the paragraph at `cfi` for a moment: after the pages are laid out again (a bigger
+ * window shows more text per page, and pages have fixed edges), the page starts before the
+ * place you were reading, and this shows where it is.
+ */
+function showPlace(r: Rendition | null, cfi: string): void {
+  let node: Node | null = null
+  try {
+    node = (r as unknown as { getRange: (c: string) => Range | null } | null)?.getRange(cfi)?.startContainer ?? null
+  } catch {
+    return
+  }
+  let el = node && (node.nodeType === 1 ? (node as Element) : node.parentElement)
+  while (el && !/^(P|LI|H[1-6]|BLOCKQUOTE|PRE|DD|DT|FIGCAPTION|TD|TH)$/.test(el.tagName) && el.parentElement && el.tagName !== 'BODY') el = el.parentElement
+  if (!el || el.tagName === 'BODY') return
+  const box = el as HTMLElement
+  const before = { bg: box.style.backgroundColor, transition: box.style.transition }
+  box.style.transition = 'background-color .9s ease'
+  box.style.backgroundColor = 'rgba(250, 204, 21, .45)'
+  setTimeout(() => (box.style.backgroundColor = before.bg), 900)
+  setTimeout(() => (box.style.transition = before.transition), 1900)
+}
+
+/**
+ * With two pages side by side, epub.js pairs the pages from the start of the chapter, so the
+ * place you were reading can land on the right page after a re-layout (a bigger window) or
+ * when the book opens: the left page then shows text you had already read, as if you had
+ * gone back. Move on by one page so that place is on the left again; turning pages after
+ * that still goes two at a time.
+ */
+function placeOnLeftPage(r: Rendition | null, cfi: string): void {
+  type View = { offset: () => { left: number }; locationOf: (target: string) => { left: number } | undefined }
+  type Manager = {
+    isPaginated: boolean
+    layout: { divisor: number; pageWidth: number; delta: number }
+    container: HTMLElement
+    visible: () => View[]
+    scrollTo: (x: number, y: number, silent: boolean) => void
+  }
+  const m = (r as unknown as { manager?: Manager } | null)?.manager
+  if (!r || !m?.isPaginated || !m.layout || m.layout.divisor < 2) return
+  for (const view of m.visible()) {
+    let at: { left: number } | undefined
+    try {
+      at = view.locationOf(cfi)
+    } catch {
+      continue // the place is in another chapter's view
+    }
+    if (!at || !Number.isFinite(at.left)) continue
+    const x = view.offset().left + at.left
+    const left = m.container.scrollLeft
+    const page = m.layout.pageWidth
+    // On the right page, and there is a page after it to pair with.
+    if (x >= left + page - 2 && left + page + m.layout.delta <= m.container.scrollWidth + 2) {
+      m.scrollTo(left + page, 0, true)
+      ;(r as unknown as { reportLocation?: () => void }).reportLocation?.()
+    }
+    return
+  }
+}
 const MIN_SPREAD_WIDTH = 1100
 
 /** The part of epub.js's Contents (one shown chapter) used to place outline entries. */
@@ -222,6 +283,10 @@ const EpubView = forwardRef<ReaderHandle, Props>(function EpubView(props, ref) {
     let lastCfi: string | null = null
     let restoring: string | null = null
     let exactAfterRestore: string | null = null
+    // For a moment after a re-layout, epub.js may lay the pages out once more (going to two
+    // pages side by side happens a little later) and show the pair from its start: each new
+    // position it reports then puts your place back on the left page.
+    let keepOnLeft: { cfi: string; until: number } | null = null
     let restoreTimer: ReturnType<typeof setTimeout> | undefined
     const relayout = (change: () => void): void => {
       restoring ??= lastCfi
@@ -230,7 +295,12 @@ const EpubView = forwardRef<ReaderHandle, Props>(function EpubView(props, ref) {
       restoreTimer = setTimeout(async () => {
         const at = restoring
         try {
-          if (at && !cancelled) await rendition.current?.display(at)
+          if (at && !cancelled) {
+            await rendition.current?.display(at)
+            keepOnLeft = { cfi: at, until: Date.now() + 1500 }
+            placeOnLeftPage(rendition.current, at)
+            showPlace(rendition.current, at)
+          }
         } finally {
           // Keep the exact place, not the start of the page(s) now shown: with two pages that
           // is the left page, and each re-layout would move you back a little. epub.js reports
@@ -301,15 +371,20 @@ const EpubView = forwardRef<ReaderHandle, Props>(function EpubView(props, ref) {
       // Where you are: remember the position, highlight the current chapter in the outline.
       r.on('relocated', (location: { start: { cfi: string; href: string; index: number }; end: { cfi: string } }) => {
         if (restoring) return // a passing position while the pages are laid out again
+        if (keepOnLeft && Date.now() < keepOnLeft.until) placeOnLeftPage(r, keepOnLeft.cfi)
+        // Right after a re-layout the page shown starts before your place (pages have fixed
+        // edges): your place, not the page's start, is kept, saved and counted, or each resize
+        // would move you back a little.
         lastCfi = exactAfterRestore ?? location.start.cfi
         exactAfterRestore = null
-        saveLocal(positionKey(doc.path), location.start.cfi)
+        const place = lastCfi
+        saveLocal(positionKey(doc.path), place)
         const active = activeEntry(location)
         cb.current.onReading(0, active)
         const ready = (book?.locations as unknown as { length(): number } | undefined)?.length() ?? 0
         setProgress({
           chapter: active >= 0 ? toc.current[active].label : '',
-          percent: ready ? Math.round((book!.locations.percentageFromCfi(location.start.cfi) ?? 0) * 100) : null
+          percent: ready ? Math.round((book!.locations.percentageFromCfi(place) ?? 0) * 100) : null
         })
       })
       /**
@@ -385,8 +460,13 @@ const EpubView = forwardRef<ReaderHandle, Props>(function EpubView(props, ref) {
       })
       r.on('rendered', () => draw())
 
-      await r.display(loadLocal<string | null>(positionKey(doc.path), null) ?? undefined)
+      const savedPlace = loadLocal<string | null>(positionKey(doc.path), null)
+      await r.display(savedPlace ?? undefined)
       if (cancelled) return
+      if (savedPlace) {
+        keepOnLeft = { cfi: savedPlace, until: Date.now() + 1500 }
+        placeOnLeftPage(r, savedPlace)
+      }
       draw()
       cb.current.onReady()
 

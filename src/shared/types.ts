@@ -277,7 +277,7 @@ export interface DocsApi {
   /** Mouse back/forward buttons. */
   onHistory(cb: (direction: 'back' | 'forward') => void): () => void
   /** Ctrl+W (close the tab), Ctrl+Tab / Ctrl+Shift+Tab (next / previous tab), from anywhere in the window. */
-  onTabKey(cb: (key: 'close' | 'next' | 'prev') => void): () => void
+  onTabKey(cb: (key: 'close' | 'next' | 'prev' | 'sidebar') => void): () => void
   /**
    * Asks where to save, then prints the document (md or html) to PDF, optionally with its
    * highlights and notes. Resolves with the file path, or null if cancelled.

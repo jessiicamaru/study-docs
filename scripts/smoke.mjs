@@ -2096,6 +2096,20 @@ try {
   check(true, '"Thử lại" translates it')
   await page.keyboard.press('Escape')
 
+  step('44. The sidebar hides (its button, Ctrl+\\) and comes back; Ctrl+K shows it for searching')
+  await page.click('.sidebar-head .icon-btn[aria-label="Ẩn thanh bên"]')
+  await page.waitForSelector('.side-rail')
+  check(!(await page.isVisible('.sidebar')) && (await page.evaluate(() => localStorage.getItem('sidebar-hidden'))) === 'true', 'the sidebar hides, a thin bar stays; remembered')
+  await realKey('\\', ['control'])
+  await page.waitForSelector('.sidebar', { state: 'visible' })
+  check((await page.locator('.side-rail').count()) === 0, 'Ctrl+\\ brings it back')
+  await realKey('\\', ['control'])
+  await page.waitForSelector('.side-rail')
+  await realKey('K', ['control'])
+  await page.waitForSelector('.sidebar', { state: 'visible' })
+  check(await page.evaluate(() => document.activeElement?.closest('.search') !== null), 'Ctrl+K shows the sidebar and puts the cursor in search')
+  await page.keyboard.press('Escape')
+
   check(errors.length === 0, `no console errors${errors.length ? ': ' + errors.join(' | ') : ''}`)
 } catch (err) {
   console.error(err)

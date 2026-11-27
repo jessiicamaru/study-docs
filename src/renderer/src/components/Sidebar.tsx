@@ -43,6 +43,8 @@ interface Props {
   recentOpen: boolean
   onRecentOpen: (open: boolean) => void
   onOpenSettings: () => void
+  /** Hides the sidebar (Ctrl+\); a thin bar stays to bring it back. */
+  onHide: () => void
   /** The calendar is shown instead of a document. */
   calendarOpen: boolean
   onToggleCalendar: () => void
@@ -113,6 +115,9 @@ export default function Sidebar(props: Props) {
         </button>
         <button className="icon-btn" title={t('Cài đặt')} onClick={props.onOpenSettings}>
           <GearIcon />
+        </button>
+        <button className="icon-btn" title={t('Ẩn thanh bên (Ctrl+\\)')} aria-label={t('Ẩn thanh bên')} onClick={props.onHide}>
+          <PanelIcon />
         </button>
         {props.recentOpen && (
           <RecentPopover lib={lib} selected={selected} onOpen={onOpen} onClose={() => props.onRecentOpen(false)} />
@@ -674,6 +679,26 @@ function CalendarIcon() {
     <svg {...iconProps}>
       <rect x="3.5" y="5" width="17" height="15" rx="2" />
       <path d="M3.5 9.5h17M8 3v4M16 3v4" />
+    </svg>
+  )
+}
+
+/** A window with its left panel: shows / hides the sidebar. */
+export function PanelIcon() {
+  return (
+    <svg {...iconProps}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16" />
+    </svg>
+  )
+}
+
+/** A magnifying glass: search. */
+export function SearchIcon() {
+  return (
+    <svg {...iconProps}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
     </svg>
   )
 }

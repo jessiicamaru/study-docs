@@ -1388,6 +1388,13 @@ async function writeDocChecked(rel: string, build: (current: string) => string, 
   return (await fs.stat(abs)).mtimeMs
 }
 
+/**
+ * The accent colour of the reading style of HTML notes (page-style.ts). Kept here, set at start
+ * and when the settings change: a page being served must not wait on, or fail with, the
+ * settings file (it may be in the middle of being written).
+ */
+let pageAccent = '#b4531f'
+
 /** Spreadsheets bigger than this are not opened in the app. */
 const MAX_SHEET_BYTES = 30 * 1024 * 1024
 
@@ -1808,6 +1815,7 @@ function registerIpc(): void {
     const clean = sanitizeUi(ui)
     await saveSettings({ ui: clean })
     nativeTheme.themeSource = clean.theme // also switches prefers-color-scheme for the pages
+    pageAccent = clean.accent
     setLanguage(clean.language)
     return clean
   })
@@ -1940,7 +1948,8 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // Tabs: Ctrl+W closes the open tab (not the window), Ctrl+Tab / Ctrl+Shift+Tab switch tabs;
+  // Tabs: Ctrl+W closes the open tab (not the window), Ctrl+Tab / Ctrl+Shift+Tab switch tabs,
+  // Ctrl+\ shows or hides the sidebar;
   // wherever the keyboard focus is, inside a page too.
   webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || !(input.control || input.meta) || input.alt) return
@@ -1951,6 +1960,10 @@ function createWindow(): void {
     } else if (key === 'tab') {
       event.preventDefault()
       webContents.send('nav:tab', input.shift ? 'prev' : 'next')
+    } else if (key === '\\' && !input.shift) {
+      // Ctrl+\: show / hide the sidebar.
+      event.preventDefault()
+      webContents.send('nav:tab', 'sidebar')
     }
   })
 
@@ -2016,7 +2029,16 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   app.whenReady().then(async () => {
-    protocol.handle('doc', async (request) => {
+    protocol.handle('doc', (request) =>
+      serveDoc(request).catch((err: unknown) => {
+        console.error('doc:// failed', request.url, err)
+        return new Response(`<!doctype html><meta charset="utf-8"><p style="font:14px system-ui;padding:24px;color:#c24a4a">${String(err instanceof Error ? err.message : err).replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'))}</p>`, {
+          status: 500,
+          headers: { 'Content-Type': 'text/html; charset=utf-8' }
+        })
+      })
+    )
+    async function serveDoc(request: Request): Promise<Response> {
       const target = parseDocUrl(request.url) // null for malformed URLs such as a stray "%"
       // Hidden files and folders (.git, old .docs-*.json...) are never served to a page.
       const hidden = target?.path.split('/').some((part) => part.startsWith('.'))
@@ -2028,7 +2050,7 @@ if (!app.requestSingleInstanceLock()) {
       if (new URL(request.url).searchParams.get('edit') === '1' && kindOf(abs) === 'html') {
         const nonce = randomBytes(16).toString('base64')
         const source = await fs.readFile(abs, 'utf8')
-        return new Response(withReadingStyle(source, (await loadUiSettings()).accent) + editModeInjection(nonce), {
+        return new Response(withReadingStyle(source, pageAccent) + editModeInjection(nonce), {
           headers: {
             'Content-Type': 'text/html; charset=utf-8',
             'Content-Security-Policy': `script-src 'nonce-${nonce}'; object-src 'none'`
@@ -2053,10 +2075,10 @@ if (!app.requestSingleInstanceLock()) {
         }
         // Reading mode: add the helper for outline, highlights, reading position and shortcuts.
         // App notes and pages without a style of their own get the reading style (not written to the file).
-        return html(withReadingStyle(source, (await loadUiSettings()).accent) + viewModeInjection())
+        return html(withReadingStyle(source, pageAccent) + viewModeInjection())
       }
       return net.fetch(pathToFileURL(abs).toString())
-    })
+    }
 
     registerIpc()
     registerCalendarIpc()
@@ -2064,6 +2086,7 @@ if (!app.requestSingleInstanceLock()) {
     blockNetworkForPrinting()
     const startUi = await loadUiSettings()
     nativeTheme.themeSource = startUi.theme
+    pageAccent = startUi.accent
     setLanguage(startUi.language)
 
     scanCache = new ScanCache(path.join(app.getPath('userData'), 'scan-cache.json'))
