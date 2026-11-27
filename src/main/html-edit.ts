@@ -36,7 +36,10 @@ type ChildNode = DefaultTreeAdapterMap['childNode']
 const INLINE_TAGS = new Set(['a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'cite', 'code', 'data', 'del', 'dfn', 'em', 'i', 'img', 'ins', 'kbd', 'mark', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'time', 'u', 'var', 'wbr'])
 
 /** What a block added while editing may be. */
-const NEW_BLOCK_TAGS = new Set(['p', 'li', 'h2', 'h3', 'h4', 'ul', 'ol', 'table', 'tr', 'td', 'th'])
+const NEW_BLOCK_TAGS = new Set(['p', 'li', 'h2', 'h3', 'h4', 'ul', 'ol', 'table', 'tr', 'td', 'th', 'blockquote', 'hr'])
+
+/** Blocks of the file whose kind can change (paragraph, heading, quote): only their tag names change. */
+const RETAG_TAGS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'])
 
 /** The cells of a row: only <td>/<th>, each cleaned like a block, on one line. */
 function sanitizeCells(row: Element | undefined): string {
@@ -182,6 +185,7 @@ export function applyHtmlEdits(source: string, edits: HtmlBlockEdit[]): string {
       const { head, body } = rowsOf(`<tr>${b.html}</tr>`)
       return `<tr>${head[0] ?? body[0] ?? ''}</tr>`
     }
+    if (b.tag === 'hr') return '<hr>'
     return `<${b.tag}>${sanitizeInline(b.html)}</${b.tag}>`
   }
 
@@ -205,7 +209,7 @@ export function applyHtmlEdits(source: string, edits: HtmlBlockEdit[]): string {
       throw new HtmlEditError(t('Đoạn văn đã sửa không khớp với file (<{0}> ≠ <{1}>). Hãy sửa trong raw.', { 0: edit.tag, 1: node.tagName }))
     }
     const loc = node.sourceCodeLocation
-    const needsTags = typeof edit.html === 'string' || !!edit.after?.length || !!edit.before?.length
+    const needsTags = typeof edit.html === 'string' || !!edit.after?.length || !!edit.before?.length || !!edit.retag
     if (needsTags && (!loc?.startTag || !loc.endTag)) {
       throw new HtmlEditError(t('Thẻ <{0}> trong file không có thẻ đóng nên không sửa trực tiếp được. Hãy sửa đoạn này trong raw.', { 0: edit.tag }))
     }
@@ -229,6 +233,22 @@ export function applyHtmlEdits(source: string, edits: HtmlBlockEdit[]): string {
       const indent = lead ?? ''
       const added = edit.before.map((b) => `${newBlock(b, indent)}${lead !== null ? `\n${indent}` : ''}`).join('')
       ops.push({ start: loc.startTag.startOffset, end: loc.startTag.startOffset, render: () => added })
+    }
+    if (edit.retag && loc?.startTag && loc.endTag) {
+      // Another kind of block (paragraph -> heading, quote...): only the two tag names change,
+      // its attributes and everything inside stay.
+      const to = String(edit.retag).toLowerCase()
+      if (!RETAG_TAGS.has(node.tagName) || !RETAG_TAGS.has(to)) {
+        throw new HtmlEditError(t('Không đổi được <{0}> thành <{1}> ở đây; hãy dùng Raw.', { 0: node.tagName, 1: to }))
+      }
+      const name = node.tagName.length
+      const open = loc.startTag.startOffset + 1
+      const close = loc.endTag.startOffset + 2
+      if (text.slice(open, open + name).toLowerCase() !== node.tagName || text.slice(close, close + name).toLowerCase() !== node.tagName) {
+        throw new HtmlEditError(t('Không đổi được <{0}> thành <{1}> ở đây; hãy dùng Raw.', { 0: node.tagName, 1: to }))
+      }
+      ops.push({ start: open, end: open + name, render: () => to })
+      ops.push({ start: close, end: close + name, render: () => to })
     }
     if (typeof edit.html === 'string' && loc?.startTag && loc.endTag) {
       const inner = sanitizeInline(edit.html, text.slice(loc.startTag.endOffset, loc.endTag.startOffset))
@@ -322,6 +342,8 @@ export function editModeInjection(nonce: string): string {
   [data-sd-block][data-sd-dirty], [data-sd-new] { box-shadow: inset 3px 0 0 rgba(47, 93, 138, .75); }
   td[data-sd-block][data-sd-new], th[data-sd-block][data-sd-new], td[data-sd-block][data-sd-dirty], th[data-sd-block][data-sd-dirty] { box-shadow: none; background-color: rgba(47, 93, 138, .08); }
   [data-sd-new]:empty::before { content: '\\200b'; }
+  hr[data-sd-new] { cursor: pointer; }
+  hr[data-sd-new]:hover { outline: 2px dashed rgba(194, 74, 74, .7); outline-offset: 6px; }
   [data-sd-block] img { max-width: 100%; }
   table[data-sd-new-table] { border-collapse: collapse; margin: .8em 0; }
   table[data-sd-new-table] th, table[data-sd-new-table] td { border: 1px solid rgba(128, 128, 128, .45); padding: 6px 10px; text-align: left; }
@@ -366,10 +388,12 @@ export function editModeInjection(nonce: string): string {
 
   // A block = the outermost element that has text and only inline tags inside.
   const blocks = []
+  // A blank line: a paragraph with nothing but line breaks in it (<p><br></p>).
+  const isBlankLine = (el) => el.tagName === 'P' && !el.textContent.trim() && [...el.children].every((c) => c.tagName === 'BR')
   const walk = (el) => {
     for (const child of el.children) {
       if (isOurs(child) || child.namespaceURI !== HTML_NS || SKIP.has(child.tagName)) continue
-      if ((child.textContent.trim() || child.tagName === 'TD' || child.tagName === 'TH') && onlyInline(child)) {
+      if ((child.textContent.trim() || child.tagName === 'TD' || child.tagName === 'TH' || isBlankLine(child)) && onlyInline(child)) {
         blocks.push({ el: child, path: pathOf(child), tag: child.tagName.toLowerCase(), original: child.innerHTML })
       } else {
         walk(child)
@@ -381,10 +405,17 @@ export function editModeInjection(nonce: string): string {
   // Every element of the file and its position in it, taken now: blocks may move or be added
   // later, and the file is changed by these first positions.
   const orig = new WeakMap()
+  // ...and its tag in the file (a block may get another kind while editing).
+  const origTag = new WeakMap()
   for (const el of document.documentElement.querySelectorAll('*')) {
     if (el.closest('[data-studydocs]')) continue
     orig.set(el, pathOf(el))
+    origTag.set(el, el.tagName.toLowerCase())
   }
+  const tagInFile = (el) => origTag.get(el) || el.tagName.toLowerCase()
+  // Kinds a block of the file can become: only its tag name changes in the file.
+  const RETAG = new Set(['P','H1','H2','H3','H4','H5','H6','BLOCKQUOTE'])
+  const HR_TITLE = ${JSON.stringify(t('Đường kẻ vừa thêm: bấm để bỏ'))}
   // Containers whose children were dragged into a new order.
   const reordered = new Set()
 
@@ -420,12 +451,23 @@ export function editModeInjection(nonce: string): string {
   const added = []
   const kept = (el) => el.isConnected && (el.textContent.trim() !== '' || !!el.querySelector('img'))
   // Table parts added while editing are kept even when empty (a row or column was asked for).
-  const isTablePart = (el) => el.hasAttribute('data-sd-new-row') || el.hasAttribute('data-sd-new-table') || el.tagName === 'TD' || el.tagName === 'TH'
-  const counts = (el) => el.isConnected && (isTablePart(el) || kept(el))
+  const isTablePart = (el) => el.hasAttribute('data-sd-new-row') || el.hasAttribute('data-sd-new-table') || el.tagName === 'TD' || el.tagName === 'TH' || el.tagName === 'HR'
+  // An empty paragraph added while editing, with text before and after it: a blank line, saved
+  // as <p><br></p>. Empty ones at the end (an extra Enter) are not saved.
+  const hasContent = (el) => !!el && (!el.hasAttribute('data-sd-new') ? !el.hasAttribute('data-studydocs') : kept(el) || isTablePart(el) || el.hasAttribute('data-sd-new-list'))
+  const blankLine = (el) => {
+    if (!el.isConnected || el.tagName !== 'P' || !el.hasAttribute('data-sd-new') || kept(el)) return false
+    let before = el.previousElementSibling
+    while (before && before.tagName === 'P' && before.hasAttribute('data-sd-new') && !kept(before)) before = before.previousElementSibling
+    let after = el.nextElementSibling
+    while (after && after.tagName === 'P' && after.hasAttribute('data-sd-new') && !kept(after)) after = after.nextElementSibling
+    return hasContent(before) && hasContent(after)
+  }
+  const counts = (el) => el.isConnected && (isTablePart(el) || kept(el) || blankLine(el))
   // Elements of the file deleted while editing (table rows, columns, tables).
   const removed = []
   const dirtyCount = () =>
-    blocks.filter((b) => b.el.isConnected && b.el.innerHTML !== b.original).length + svgTexts.filter((t) => t.el.textContent !== t.original).length +
+    blocks.filter((b) => b.el.isConnected && (b.el.innerHTML !== b.original || b.retag)).length + svgTexts.filter((t) => t.el.textContent !== t.original).length +
     added.filter(counts).length + reordered.size + removed.length
 
   let box = null
@@ -468,9 +510,9 @@ export function editModeInjection(nonce: string): string {
   // What may happen inside a block: typing, deleting, line breaks (Shift+Enter), bold, italic,
   // underline, strike, links, undo. Pasting is handled below (plain text or a picture).
   const ALLOWED = new Set(['insertText','insertReplacementText','insertCompositionText','insertLineBreak','insertLink','deleteContentBackward','deleteContentForward','deleteContent','deleteWordBackward','deleteWordForward','deleteSoftLineBackward','deleteSoftLineForward','deleteHardLineBackward','deleteHardLineForward','deleteByCut','historyUndo','historyRedo','formatBold','formatItalic','formatUnderline','formatStrikeThrough','formatRemove'])
-  const SPLITS = new Set(['P','LI','H1','H2','H3','H4','H5','H6'])
+  const SPLITS = new Set(['P','LI','H1','H2','H3','H4','H5','H6','BLOCKQUOTE'])
   const changed = () => {
-    for (const b of blocks) b.el.toggleAttribute('data-sd-dirty', b.el.innerHTML !== b.original)
+    for (const b of blocks) b.el.toggleAttribute('data-sd-dirty', b.el.innerHTML !== b.original || !!b.retag)
     send({ type: 'dirty', count: dirtyCount() })
   }
   const caretAtStart = (el) => {
@@ -498,6 +540,21 @@ export function editModeInjection(nonce: string): string {
   document.addEventListener('selectionchange', () => {
     const sel = getSelection()
     if (sel.rangeCount && blockOf(sel.anchorNode)) lastRange = sel.getRangeAt(0).cloneRange()
+  })
+  // "selectionchange" comes a moment after a click: a block that just got the focus counts at
+  // once (the paragraph-type menu may be used right after clicking).
+  document.addEventListener('focusin', (e) => {
+    const el = blockOf(e.target)
+    if (!el || (lastRange && el.contains(lastRange.startContainer))) return
+    const sel = getSelection()
+    if (sel.rangeCount && el.contains(sel.anchorNode)) {
+      lastRange = sel.getRangeAt(0).cloneRange()
+      return
+    }
+    const r = document.createRange()
+    r.selectNodeContents(el)
+    r.collapse(false)
+    lastRange = r
   })
   const restore = () => {
     const el = lastRange && blockOf(lastRange.startContainer)
@@ -745,6 +802,17 @@ export function editModeInjection(nonce: string): string {
           r.collapse(true)
         }
         el.remove()
+        changed()
+        return
+      }
+      if (e.key === 'Backspace' && !isNew && isBlankLine(el) && orig.has(el)) {
+        // A blank line of the file: Backspace takes it away.
+        e.preventDefault()
+        const prev = el.previousElementSibling
+        removed.push(el)
+        removedFrom.set(el, el.parentElement)
+        el.remove()
+        if (prev && prev.hasAttribute('data-sd-block')) placeCaret(prev, true)
         changed()
         return
       }
@@ -1107,8 +1175,8 @@ export function editModeInjection(nonce: string): string {
       if (restore()) document.execCommand(e.data.cmd, false, e.data.value)
       changed()
     }
-    // Paragraph type (heading, list…): only for paragraphs added while editing; the page's own
-    // blocks keep their tag (changing that is a layout change, for Raw).
+    // Paragraph type (heading, list, quote…). Blocks added while editing can become anything;
+    // the page's own paragraphs, headings and quotes can become one another (lists: in Raw).
     if (e.data.type === 'insert-table') insertTable()
     if (e.data.type === 'block') {
       const el = restore()
@@ -1116,7 +1184,25 @@ export function editModeInjection(nonce: string): string {
       if (el.tagName === 'TD' || el.tagName === 'TH') return
       const inNewList = el.tagName === 'LI' && el.parentElement.hasAttribute('data-sd-new-list')
       if (!el.hasAttribute('data-sd-new')) {
-        send({ type: 'block-refused' })
+        // A block of the file: a paragraph, heading or quote can become another of these.
+        const b = blocks.find((x) => x.el === el)
+        const to = String(e.data.tag).toUpperCase()
+        if (!b || !RETAG.has(el.tagName) || !RETAG.has(to)) {
+          send({ type: 'block-refused' })
+          return
+        }
+        if (el.tagName === to) return
+        const next = document.createElement(to.toLowerCase())
+        for (const a of [...el.attributes]) next.setAttribute(a.name, a.value)
+        while (el.firstChild) next.appendChild(el.firstChild)
+        el.replaceWith(next)
+        wire(next, false)
+        orig.set(next, orig.get(el))
+        origTag.set(next, tagInFile(el))
+        b.el = next
+        b.retag = to.toLowerCase() === b.tag ? null : to.toLowerCase()
+        placeCaret(next, true)
+        changed()
         return
       }
       const tag = e.data.tag
@@ -1162,6 +1248,29 @@ export function editModeInjection(nonce: string): string {
       placeCaret(toList ? next.firstChild : next, true)
       changed()
     }
+    if (e.data.type === 'insert-hr') {
+      // A divider after the block being edited (after its list or table), and a paragraph after it.
+      const el = restore()
+      if (!el) return
+      let at = el
+      if (el.tagName === 'LI') at = el.parentElement
+      if (el.tagName === 'TD' || el.tagName === 'TH') at = el.closest('table')
+      const hr = document.createElement('hr')
+      hr.setAttribute('data-sd-new', '')
+      hr.title = HR_TITLE
+      hr.addEventListener('click', () => {
+        hr.remove()
+        changed()
+      })
+      at.after(hr)
+      added.push(hr)
+      const p = document.createElement('p')
+      hr.after(p)
+      wire(p, true)
+      added.push(p)
+      placeCaret(p, false)
+      changed()
+    }
     if (e.data.type === 'insert-image' && e.data.src) {
       const img = document.createElement('img')
       img.src = e.data.src
@@ -1194,7 +1303,14 @@ export function editModeInjection(nonce: string): string {
         return out
       }
       const htmlOf = (b) => (b.original.indexOf('&nbsp;') >= 0 ? b.el.innerHTML : fixSpaces(b.el.innerHTML))
-      const edits = blocks.filter((b) => b.el.isConnected && b.el.innerHTML !== b.original).map((b) => ({ path: b.path, tag: b.tag, html: htmlOf(b) }))
+      const edits = blocks
+        .filter((b) => b.el.isConnected && (b.el.innerHTML !== b.original || b.retag))
+        .map((b) => {
+          const edit = { path: b.path, tag: b.tag }
+          if (b.el.innerHTML !== b.original) edit.html = htmlOf(b)
+          if (b.retag) edit.retag = b.retag
+          return edit
+        })
       // New paragraphs, headings and lists belong after the nearest block of the file before them.
       const isNewNode = (n) => n.hasAttribute('data-sd-new') || n.hasAttribute('data-sd-new-list') || n.hasAttribute('data-sd-new-row') || n.hasAttribute('data-sd-new-table')
       const cellsOf = (tr) => [...tr.cells].map((c) => '<' + c.tagName.toLowerCase() + '>' + fixSpaces(c.innerHTML) + '</' + c.tagName.toLowerCase() + '>').join('')
@@ -1209,6 +1325,8 @@ export function editModeInjection(nonce: string): string {
           return { tag: 'table', html: [...el.children].filter((c) => c.tagName === 'THEAD' || c.tagName === 'TBODY').map(part).join('') }
         }
         if (el.hasAttribute('data-sd-new-row')) return { tag: 'tr', html: cellsOf(el) }
+        if (el.tagName === 'HR') return { tag: 'hr', html: '' }
+        if (blankLine(el)) return { tag: 'p', html: '<br>' }
         if (el.tagName === 'TD' || el.tagName === 'TH') return { tag: el.tagName.toLowerCase(), html: fixSpaces(el.innerHTML) }
         return kept(el) ? { tag: el.tagName.toLowerCase(), html: fixSpaces(el.innerHTML) } : null
       }
@@ -1216,7 +1334,7 @@ export function editModeInjection(nonce: string): string {
       const editOf = (el) => {
         const path = orig.get(el)
         let edit = edits.find((x) => x.path.join() === path.join())
-        if (!edit) edits.push((edit = { path, tag: el.tagName.toLowerCase() }))
+        if (!edit) edits.push((edit = { path, tag: tagInFile(el) }))
         return edit
       }
       // Containers in a new order: all their children, in order (new blocks included).
@@ -1258,7 +1376,7 @@ export function editModeInjection(nonce: string): string {
       // Deleted rows, columns and tables (in a reordered container they are left out of its order).
       for (const el of removed) {
         if (reordered.has(removedFrom.get(el)) || removed.some((r) => r !== el && r.contains && r.contains(el))) continue
-        edits.push({ path: orig.get(el), tag: el.tagName.toLowerCase(), remove: true })
+        edits.push({ path: orig.get(el), tag: tagInFile(el), remove: true })
       }
       for (const t of svgTexts) {
         if (t.el.textContent !== t.original) edits.push({ path: t.path, tag: t.tag, html: escapeText(t.el.textContent) })

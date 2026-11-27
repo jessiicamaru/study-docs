@@ -433,7 +433,7 @@ export default function DocView(props: Props) {
                 <select
                   className="block-type"
                   aria-label={t('Kiểu đoạn')}
-                  title={t('Kiểu của đoạn vừa thêm (Enter để thêm đoạn)')}
+                  title={t('Kiểu của đoạn đang sửa: đoạn văn, tiêu đề, trích dẫn, danh sách')}
                   value=""
                   onMouseDown={(e) => e.stopPropagation()}
                   onChange={(e) => {
@@ -447,6 +447,7 @@ export default function DocView(props: Props) {
                   <option value="p">{t('Đoạn văn')}</option>
                   <option value="h2">{t('Tiêu đề mục')}</option>
                   <option value="h3">{t('Tiêu đề nhỏ')}</option>
+                  <option value="blockquote">{t('Trích dẫn (thụt vào)')}</option>
                   <option value="ul">{t('Danh sách')}</option>
                   <option value="ol">{t('Danh sách đánh số')}</option>
                 </select>
@@ -467,6 +468,9 @@ export default function DocView(props: Props) {
                 </button>
                 <button className="md-tool" title={t('Chèn ảnh (hoặc dán ảnh bằng Ctrl+V)')} onMouseDown={(e) => e.preventDefault()} onClick={() => imageInputRef.current?.click()}>
                   {t('Ảnh')}
+                </button>
+                <button className="md-tool" title={t('Đường kẻ ngang sau đoạn đang sửa (bấm vào đường kẻ mới để bỏ)')} onMouseDown={(e) => e.preventDefault()} onClick={() => readerRef.current?.insertDivider?.()}>
+                  {t('Đường kẻ')}
                 </button>
                 <button className="md-tool" title={t('Chèn bảng sau đoạn đang sửa (Tab chuyển ô)')} onMouseDown={(e) => e.preventDefault()} onClick={() => readerRef.current?.insertTable?.()}>
                   {t('Bảng')}

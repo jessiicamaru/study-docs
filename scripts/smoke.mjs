@@ -200,6 +200,27 @@ await page.emulateMedia({ colorScheme: null }) // Playwright forces "light" by d
 const settingsTab = (name) => page.click(`dialog.settings .settings-tabs >> text=${name}`)
 const openDoc = (title) => page.click(`.doc-list .row.doc >> text=${title}`)
 const docPathIs = (p) => page.waitForSelector(`.doc-path:text-is("${p}")`, { timeout: 5000 })
+/**
+ * The edit page has been painted. Right after the frame switches to edit mode, a click can reach
+ * the page before its first paint and is lost (only a test is that fast).
+ */
+const painted = async (frame) => {
+  await frame.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+}
+const editPage = async () => {
+  let fr = null
+  for (let i = 0; i < 100 && !fr; i++) {
+    fr = page.frames().find((x) => x.url().includes('?edit=1')) ?? null
+    if (!fr) await page.waitForTimeout(100)
+  }
+  if (!fr) {
+    const frame = await page.evaluate(() => [...document.querySelectorAll('iframe.html-frame')].map((f) => f.className + ' ' + f.src))
+    throw new Error(`the page did not switch to edit mode: ${JSON.stringify(frame)} | frames: ${JSON.stringify(page.frames().map((x) => x.url()))}`)
+  }
+  await fr.waitForSelector('[data-sd-block]')
+  await painted(fr)
+  return fr
+}
 const editBarGone = () => page.waitForSelector('.edit-bar', { state: 'detached', timeout: 5000 })
 
 try {
@@ -464,13 +485,15 @@ try {
   await page.click('.doc-controls >> text=Sửa chữ')
   const editFrame = page.frameLocator('iframe.html-frame.editing')
   await editFrame.locator('h1[data-sd-block]').waitFor()
+  await editPage()
   await editFrame.locator('h1').click()
   await page.keyboard.press('End')
   await page.keyboard.type(' cơ bản')
   await editFrame.locator('.sub').click()
   await page.keyboard.press('Control+End')
   await page.keyboard.type(' Chúc học vui!')
-  await page.keyboard.press('Enter') // a new paragraph, left empty: nothing is added to the file
+  await page.keyboard.press('Enter') // a blank line, taken back with Backspace: nothing is added to the file
+  await page.keyboard.press('Backspace')
   await page.screenshot({ path: shot('6-html-inline-edit') })
   await page.click('.edit-bar >> text=Lưu (Ctrl+S)')
   await editBarGone()
@@ -478,7 +501,7 @@ try {
   const htmlAfter = read(ES)
   check(
     htmlAfter === htmlBefore.replace('<h1>Event Sourcing</h1>', '<h1>Event Sourcing cơ bản</h1>').replace('lên production.</p>', 'lên production. Chúc học vui!</p>'),
-    'HTML inline edit changes only the typed text (an empty new paragraph is not saved)'
+    'HTML inline edit changes only the typed text (a blank line taken back is not saved)'
   )
   await page.frameLocator('iframe.html-frame').locator('h1 >> text=Event Sourcing cơ bản').waitFor()
   check(true, 'HTML view reloads with the saved text')
@@ -499,6 +522,7 @@ try {
   // 11. Unsaved changes: switching docs asks first (dismissed = stay), Esc + confirm cancels.
   step("11. Unsaved changes: switching docs asks first (dismissed = stay), Esc + confirm cancels.")
   await page.click('.doc-controls >> text=Sửa chữ')
+  await editPage()
   await page.frameLocator('iframe.html-frame.editing').locator('h1[data-sd-block]').click()
   await page.keyboard.type('XYZ')
   await page.waitForTimeout(200)
@@ -515,6 +539,7 @@ try {
   await openDoc('Lộ trình Backend')
   await docPathIs(ROADMAP) // or "Sửa chữ" may still belong to the document before
   await page.click('.doc-controls >> text=Sửa chữ')
+  await editPage()
   await page.frameLocator('iframe.html-frame.editing').locator('h1[data-sd-block]').click()
   await page.keyboard.type('!')
   const external = read(ROADMAP).replace('Trang mẫu', 'Trang mẫu (sửa ở app khác)')
@@ -1675,12 +1700,9 @@ try {
   const noteBefore = read('backend/Ghi chép HTML.html')
   await page.click('.doc-controls >> text=Sửa chữ')
   await page.waitForSelector('.html-format')
-  let noteFrame = null
-  for (let i = 0; i < 100 && !noteFrame; i++) {
-    noteFrame = page.frames().find((fr) => fr.url().includes('?edit=1')) ?? null
-    if (!noteFrame) await page.waitForTimeout(100)
-  }
+  const noteFrame = await editPage()
   await noteFrame.waitForSelector('p[data-sd-block]')
+  await painted(noteFrame)
   await noteFrame.click('p[data-sd-block]')
   await page.keyboard.press('Control+A')
   await page.keyboard.type('Một câu ')
@@ -1710,12 +1732,9 @@ try {
   step('34. HTML: a new paragraph becomes a heading, then a list; Enter on an empty item ends the list')
   await page.click('.doc-controls >> text=Sửa chữ')
   await page.waitForSelector('.html-format')
-  let fmtFrame = null
-  for (let i = 0; i < 100 && !fmtFrame; i++) {
-    fmtFrame = page.frames().find((fr) => fr.url().includes('?edit=1')) ?? null
-    if (!fmtFrame) await page.waitForTimeout(100)
-  }
+  const fmtFrame = await editPage()
   await fmtFrame.waitForSelector('p[data-sd-block] >> text=Đoạn mới')
+  await painted(fmtFrame)
   await fmtFrame.click('p[data-sd-block] >> text=Đoạn mới')
   await page.keyboard.press('End')
   await page.keyboard.press('Enter')
@@ -1746,12 +1765,9 @@ try {
   step('34b. HTML: a new item in a list already in the file becomes a paragraph; dragging an item reorders the list')
   await page.click('.doc-controls >> text=Sửa chữ')
   await page.waitForSelector('.html-format')
-  let dragFrame = null
-  for (let i = 0; i < 100 && !dragFrame; i++) {
-    dragFrame = page.frames().find((fr) => fr.url().includes('?edit=1')) ?? null
-    if (!dragFrame) await page.waitForTimeout(100)
-  }
+  const dragFrame = await editPage()
   await dragFrame.waitForSelector('li[data-sd-block] >> text=Ý hai')
+  await painted(dragFrame)
   await dragFrame.click('li[data-sd-block] >> text=Ý hai')
   await page.keyboard.press('End')
   await page.keyboard.press('Enter')
@@ -1783,15 +1799,11 @@ try {
   const openEditFrame = async () => {
     await page.click('.doc-controls >> text=Sửa chữ')
     await page.waitForSelector('.html-format')
-    let fr = null
-    for (let i = 0; i < 100 && !fr; i++) {
-      fr = page.frames().find((x) => x.url().includes('?edit=1')) ?? null
-      if (!fr) await page.waitForTimeout(100)
-    }
-    return fr
+    return editPage()
   }
   let tableFrame = await openEditFrame()
   await tableFrame.waitForSelector('p[data-sd-block] >> text=Kết thúc')
+  await painted(tableFrame)
   await tableFrame.click('p[data-sd-block] >> text=Kết thúc')
   await page.click('.html-format >> text=Bảng')
   await tableFrame.waitForSelector('table[data-sd-new-table]')
@@ -2003,12 +2015,9 @@ try {
   await openDoc('Dán thử')
   await page.click('.doc-controls >> text=Sửa chữ')
   await page.waitForSelector('.html-format')
-  let pasteFrame = null
-  for (let i = 0; i < 100 && !pasteFrame; i++) {
-    pasteFrame = page.frames().find((x) => x.url().includes('?edit=1')) ?? null
-    if (!pasteFrame) await page.waitForTimeout(100)
-  }
+  const pasteFrame = await editPage()
   await pasteFrame.waitForSelector('p[data-sd-block]')
+  await painted(pasteFrame)
   await pasteFrame.click('p[data-sd-block]')
   await page.keyboard.press('End')
   await pasteFrame.evaluate(() => {
@@ -2195,6 +2204,37 @@ try {
   await page.waitForSelector('.doc-list .row.doc >> text=Lộ trình Backend')
   await page.waitForFunction((n) => document.querySelectorAll('.doc-tab').length === n, tabsBefore)
   check(true, 'back in the first workspace, its tabs come back')
+
+  step('47. HTML: a saved paragraph becomes a heading or a quote; a divider; blank lines between paragraphs are kept')
+  writeFileSync(file('Kiểu đoạn.html'), '<!doctype html>\n<html>\n<head><meta charset="utf-8"><title>Kiểu đoạn</title></head>\n<body>\n<p>Tóm tắt</p>\n<p class="x">Nội dung thụt vào.</p>\n<p>Cuối</p>\n</body>\n</html>\n')
+  await page.waitForSelector('.doc-list .row.doc >> text=Kiểu đoạn', { timeout: 10000 })
+  await openDoc('Kiểu đoạn')
+  await docPathIs('Kiểu đoạn.html')
+  await page.click('.doc-controls >> text=Sửa chữ')
+  const kindFrame = await editPage()
+  await kindFrame.click('p[data-sd-block] >> text=Tóm tắt')
+  await page.waitForTimeout(100)
+  await page.selectOption('.html-format .block-type', 'h2')
+  await kindFrame.waitForSelector('h2[data-sd-block] >> text=Tóm tắt')
+  await kindFrame.click('p[data-sd-block] >> text=Nội dung thụt vào')
+  await page.waitForTimeout(100)
+  await page.selectOption('.html-format .block-type', 'blockquote')
+  await kindFrame.waitForSelector('blockquote[data-sd-block]')
+  await page.click('.html-format >> text=Đường kẻ')
+  await kindFrame.waitForSelector('hr[data-sd-new]')
+  await kindFrame.waitForFunction(() => document.hasFocus())
+  await page.waitForTimeout(100)
+  await page.keyboard.press('Enter') // a blank line after the divider...
+  await page.keyboard.type('Sau dòng trống') // ...then text
+  await page.keyboard.press('Enter') // a blank line before "Cuối" (kept: text follows)
+  await page.waitForTimeout(200)
+  await page.click('.edit-bar >> text=Lưu (Ctrl+S)')
+  await editBarGone()
+  const kinds = read('Kiểu đoạn.html').split('<body>')[1].split('</body>')[0]
+  check(
+    kinds === '\n<h2>Tóm tắt</h2>\n<blockquote class="x">Nội dung thụt vào.</blockquote>\n<hr>\n<p><br></p>\n<p>Sau dòng trống</p>\n<p><br></p>\n<p>Cuối</p>\n',
+    `saved blocks change kind (only the tag), a divider, blank lines kept (${JSON.stringify(kinds)})`
+  )
 
   check(errors.length === 0, `no console errors${errors.length ? ': ' + errors.join(' | ') : ''}`)
 } catch (err) {

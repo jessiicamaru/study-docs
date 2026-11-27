@@ -115,7 +115,7 @@ const HtmlView = forwardRef<ReaderHandle, Props>(function HtmlView(props, ref) {
           if (typeof msg.text === 'string') p.onError?.(new Error(msg.text))
           break
         case 'block-refused':
-          p.onError?.(new Error(t('Chỉ đổi kiểu được đoạn vừa thêm (bấm Enter để thêm). Đoạn có sẵn trong trang thì đổi trong Raw.')))
+          p.onError?.(new Error(t('Đoạn có sẵn trong trang chỉ đổi được qua lại giữa đoạn văn, tiêu đề và trích dẫn. Muốn thành danh sách thì đổi trong Raw.')))
           break
         case 'image':
           // A picture pasted in the page: shrunk and embedded (or saved in assets/) here, then sent back.
@@ -152,6 +152,10 @@ const HtmlView = forwardRef<ReaderHandle, Props>(function HtmlView(props, ref) {
     clearFind: () => post({ type: 'find-clear' }),
     format: (cmd, value) => post({ type: 'format', cmd, value }),
     insertImage: (src) => post({ type: 'insert-image', src }),
+    insertDivider: () => {
+      frameRef.current?.focus()
+      post({ type: 'insert-hr' })
+    },
     insertTable: () => {
       frameRef.current?.focus()
       post({ type: 'insert-table' })

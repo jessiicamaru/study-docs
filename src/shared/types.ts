@@ -254,13 +254,15 @@ export interface HtmlBlockEdit {
   after?: { tag: NewBlockTag; html: string }[]
   /** New blocks typed before this element (when nothing of the file comes before them). */
   before?: { tag: NewBlockTag; html: string }[]
+  /** Another kind of block (p, h1–h6, blockquote): only its tag names change in the file. */
+  retag?: string
   /** Deleted while editing (a table row or column). */
   remove?: boolean
   /** Its children in a new order (dragged): their indexes in the file, and blocks typed while editing. */
   order?: ({ i: number } | { tag: NewBlockTag; html: string })[]
 }
 
-export type NewBlockTag = 'p' | 'li' | 'h2' | 'h3' | 'h4' | 'ul' | 'ol' | 'table' | 'tr' | 'td' | 'th'
+export type NewBlockTag = 'p' | 'li' | 'h2' | 'h3' | 'h4' | 'ul' | 'ol' | 'table' | 'tr' | 'td' | 'th' | 'blockquote' | 'hr'
 
 /** Auto-update progress (see src/main/updater.ts). */
 export interface UpdateStatus {

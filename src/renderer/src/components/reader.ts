@@ -36,6 +36,8 @@ export interface ReaderHandle {
   insertImage?(src: string): void
   /** HTML editing: a new table after the block the caret is in. */
   insertTable?(): void
+  /** HTML editing: a divider (<hr>) after the block being edited. */
+  insertDivider?(): void
   /** HTML edit mode: the type of a paragraph added while editing (p, h2, h3, ul, ol). */
   setBlockType?(tag: string): void
   /** Draws these highlights (replacing the ones shown before). */

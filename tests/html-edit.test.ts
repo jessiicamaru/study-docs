@@ -224,3 +224,31 @@ describe('editing a block keeps what the file already had in it', () => {
     expect(applyHtmlEdits(kept, [{ path: [1, 0], tag: 'p', html }])).toContain('<p>Tải <b>file</b> xong.</p>')
   })
 })
+
+describe('changing the kind of a block of the file, dividers and quotes', () => {
+  it('a paragraph becomes a heading or a quote: only its tag names change', () => {
+    const src = '<html><body>\n  <p class="lead" id="x">Một <b>đoạn</b></p>\n  <h2>Tiêu đề</h2>\n</body></html>'
+    expect(applyHtmlEdits(src, [{ path: [1, 0], tag: 'p', retag: 'blockquote' }])).toBe(
+      '<html><body>\n  <blockquote class="lead" id="x">Một <b>đoạn</b></blockquote>\n  <h2>Tiêu đề</h2>\n</body></html>'
+    )
+    expect(applyHtmlEdits(src, [{ path: [1, 1], tag: 'h2', retag: 'p', html: 'Tiêu đề mới' }])).toContain('<p>Tiêu đề mới</p>')
+    // With new blocks after it too.
+    expect(applyHtmlEdits(src, [{ path: [1, 0], tag: 'p', retag: 'h3', after: [{ tag: 'p', html: 'Sau' }] }])).toContain(
+      '<h3 class="lead" id="x">Một <b>đoạn</b></h3>\n  <p>Sau</p>'
+    )
+  })
+  it('an upper-case tag in the file is renamed too', () => {
+    expect(applyHtmlEdits('<html><body><P>A</P></body></html>', [{ path: [1, 0], tag: 'p', retag: 'h2' }])).toBe('<html><body><h2>A</h2></body></html>')
+  })
+  it('refuses kinds it cannot change (lists, list items, cells)', () => {
+    const src = '<html><body><ul><li>A</li></ul><p>B</p></body></html>'
+    expect(() => applyHtmlEdits(src, [{ path: [1, 0, 0], tag: 'li', retag: 'p' }])).toThrow(HtmlEditError)
+    expect(() => applyHtmlEdits(src, [{ path: [1, 1], tag: 'p', retag: 'ul' }])).toThrow(HtmlEditError)
+  })
+  it('a divider and a quote added after a block', () => {
+    const src = '<html><body>\n  <p>A</p>\n</body></html>'
+    expect(applyHtmlEdits(src, [{ path: [1, 0], tag: 'p', after: [{ tag: 'hr', html: 'ignored <b>x</b>' }, { tag: 'blockquote', html: 'Ghi <i>chú</i>' }] }])).toBe(
+      '<html><body>\n  <p>A</p>\n  <hr>\n  <blockquote>Ghi <i>chú</i></blockquote>\n</body></html>'
+    )
+  })
+})
