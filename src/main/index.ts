@@ -5,7 +5,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { promises as fs, readFileSync, watch, type FSWatcher } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { Annotation, DocEntry, DocMeta, HtmlBlockEdit, LibrarySnapshot, OcrData, RecoveryItem, SheetData, SheetSave, UiSettings } from '../shared/types'
+import type { Annotation, Bookmark, DocEntry, DocMeta, HtmlBlockEdit, LibrarySnapshot, OcrData, RecoveryItem, SheetData, SheetSave, UiSettings } from '../shared/types'
 import { applyXlsxEdits, loadSheet, parseCsv, SheetError, writeCsv } from './sheet'
 import { translateText } from './translate'
 import { decodeText } from '../shared/text'
@@ -17,7 +17,7 @@ import { MetaStore } from './meta-store'
 import type { DocKeyed, DocStore } from './doc-store'
 import { ScanCache } from './scan-cache'
 import { SearchService } from './search'
-import { NotesStore, sanitizeAnnotation } from './notes-store'
+import { NotesStore, sanitizeAnnotation, sanitizeBookmark } from './notes-store'
 import { loadLooseFiles, loadRecent, loadUiSettings, loadWorkspacePaths, markOpened, sanitizeUi, saveLooseFiles, saveSettings, saveWorkspacePaths } from './storage'
 import { isSameOrInside, labelRoots, normalizeRoot, pathKey, rootConflict, rootKeyOf, splitDocId } from './workspace'
 import { canOpenWithDefaultApp } from './open-policy'
@@ -1716,6 +1716,26 @@ function registerIpc(): void {
     }
   })
 
+  // Bookmarks of a book (EPUB / Kindle), kept with its highlights and notes.
+  ipcMain.handle('bookmarks:list', (_e, id: string) => locate(String(id))?.root.notes?.bookmarks(locate(String(id))!.rel) ?? [])
+  ipcMain.handle('bookmarks:add', async (_e, id: string, input: Partial<Bookmark>) => {
+    const loc = locate(String(id))
+    if (!loc?.root.notes) throw new Error(t('File nằm ngoài thư mục tài liệu'))
+    try {
+      return await loc.root.notes.addBookmark(loc.rel, sanitizeBookmark(input), loc.root.docs.find((d) => d.path === loc.rel))
+    } catch (err) {
+      throw friendlyWriteError(err)
+    }
+  })
+  ipcMain.handle('bookmarks:remove', async (_e, id: string, bookmarkId: string) => {
+    const loc = locate(String(id))
+    if (!loc?.root.notes) throw new Error(t('File nằm ngoài thư mục tài liệu'))
+    try {
+      return await loc.root.notes.removeBookmark(loc.rel, String(bookmarkId))
+    } catch (err) {
+      throw friendlyWriteError(err)
+    }
+  })
   ipcMain.handle('notes:docNote', async (_e, id: string, text: string) => {
     const loc = locate(id)
     if (!loc?.root.notes) throw new Error(t('File nằm ngoài thư mục tài liệu'))

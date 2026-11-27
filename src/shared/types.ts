@@ -174,6 +174,20 @@ export const DEFAULT_UI: UiSettings = {
 }
 
 /** One edited block of an HTML document: which element (by position) and its new inner HTML. */
+/** A place kept in a book (EPUB/Kindle): where it is in the text, not a page number. */
+export interface Bookmark {
+  id: string
+  /** Position in the book (epub.js CFI): stays right whatever the window or text size. */
+  cfi: string
+  /** The first words there, to recognise it. */
+  quote: string
+  /** The chapter it is in. */
+  chapter: string
+  /** How far into the book (0-100), when known. */
+  percent: number | null
+  created: number
+}
+
 /** A translation of selected text. */
 export interface TranslateResult {
   text: string
@@ -286,6 +300,12 @@ export interface DocsApi {
   /** Adds or updates a highlight/note. Resolves with all annotations of that document. */
   saveAnnotation(path: string, annotation: Annotation): Promise<Annotation[]>
   deleteAnnotation(path: string, id: string): Promise<Annotation[]>
+  /** Bookmarks of a book, in reading order. */
+  bookmarks(path: string): Promise<Bookmark[]>
+  /** Adds a bookmark; resolves with the book's bookmarks. */
+  addBookmark(path: string, bookmark: Bookmark): Promise<Bookmark[]>
+  /** Removes a bookmark; resolves with the book's bookmarks. */
+  removeBookmark(path: string, id: string): Promise<Bookmark[]>
   /** Sets the note about the whole document (empty text removes it). Resolves with the saved text. */
   saveDocNote(path: string, text: string): Promise<string>
   /** Renames a tag on every document in the workspace. Resolves with how many documents changed. */
