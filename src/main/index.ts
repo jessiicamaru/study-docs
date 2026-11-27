@@ -18,7 +18,8 @@ import type { DocKeyed, DocStore } from './doc-store'
 import { ScanCache } from './scan-cache'
 import { SearchService } from './search'
 import { NotesStore, sanitizeAnnotation, sanitizeBookmark } from './notes-store'
-import { loadLooseFiles, loadRecent, loadUiSettings, loadWorkspacePaths, markOpened, sanitizeUi, saveLooseFiles, saveSettings, saveWorkspacePaths } from './storage'
+import { loadLooseFiles, loadRecent, loadUiSettings, loadWorkspacePaths, loadWorkspaceSettings, markOpened, sanitizeUi, saveLooseFiles, saveSettings, saveWorkspacePaths, saveWorkspaceSettings } from './storage'
+import { cleanName, nameFromFile, readWorkspaceFile, WORKSPACE_EXT, writeWorkspaceFile, type WorkspaceData } from './workspace-file'
 import { isSameOrInside, labelRoots, normalizeRoot, pathKey, rootConflict, rootKeyOf, splitDocId } from './workspace'
 import { canOpenWithDefaultApp } from './open-policy'
 import { looksLikeSameFolder, matchScore, remapEntries, type Remembered } from './relink'
@@ -218,6 +219,7 @@ async function snapshot(): Promise<LibrarySnapshot> {
     for (const w of [r.meta?.warning, r.notes?.warning, r.warning]) if (w) warnings.push(roots.length > 1 ? `${r.name}: ${w}` : w)
   }
   if (calendar?.warning) warnings.push(calendar.warning)
+  if (workspaceWarning) warnings.push(workspaceWarning)
   return {
     scanning,
     roots: roots.map((r) => ({ key: r.key, path: r.path, name: r.name, available: !!r.meta, loose: r.loose, emptyFolders: r.emptyFolders })),
@@ -236,7 +238,12 @@ async function snapshot(): Promise<LibrarySnapshot> {
     docNotes,
     warnings,
     recovery,
-    orphans
+    orphans,
+    workspace: {
+      name: workspace.name,
+      file: workspace.file,
+      recent: recentWorkspaces.filter((f) => !workspace.file || pathKey(f) !== pathKey(workspace.file)).map((f) => ({ path: f, name: nameFromFile(f) }))
+    }
   }
 }
 
@@ -534,7 +541,96 @@ function addToLooseRoot(abs: string): Root | null {
   return root
 }
 
-const saveLoose = (): Promise<void> => saveLooseFiles(roots.filter((r) => r.loose).flatMap((r) => r.files))
+const saveLoose = (): Promise<void> => persistWorkspace()
+
+// ---------- the workspace: kept in settings.json, or a workspace file (.studyws) ----------
+
+/** The workspace open now. `file` null: the one kept in settings.json. `name` '' = automatic. */
+let workspace: { file: string | null; name: string } = { file: null, name: '' }
+let recentWorkspaces: string[] = []
+/** Why the workspace file of the last start could not be opened (shown as a warning). */
+let workspaceWarning = ''
+const MAX_RECENT_WORKSPACES = 8
+
+/** Writes the folders and loose files where the open workspace keeps them. */
+async function persistWorkspace(): Promise<void> {
+  const folders = folderRoots().map((r) => r.path)
+  const files = roots.filter((r) => r.loose).flatMap((r) => r.files)
+  if (!workspace.file) {
+    await saveWorkspacePaths(folders)
+    await saveLooseFiles(files)
+    return
+  }
+  try {
+    await writeWorkspaceFile(workspace.file, { name: workspace.name, folders, files })
+  } catch (err) {
+    throw friendlyWriteError(err)
+  }
+}
+
+function rememberWorkspace(file: string): void {
+  recentWorkspaces = [file, ...recentWorkspaces.filter((f) => pathKey(f) !== pathKey(file))].slice(0, MAX_RECENT_WORKSPACES)
+}
+
+async function readWorkspaceOrExplain(file: string): Promise<WorkspaceData> {
+  try {
+    return await readWorkspaceFile(file)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') throw new Error(t('Không tìm thấy file workspace "{0}".', { 0: file }))
+    if (code) throw new Error(t('Không đọc được file workspace: {0}', { 0: (err as Error).message }))
+    throw new Error(t('"{0}" không phải là file workspace của Study Docs.', { 0: path.basename(file) }))
+  }
+}
+
+/** Opens a workspace file, or (null) the workspace kept in settings.json. */
+async function switchWorkspace(target: string | null): Promise<void> {
+  const file = target ? path.resolve(target) : null
+  let data: WorkspaceData
+  if (file) {
+    try {
+      data = await readWorkspaceOrExplain(file)
+    } catch (err) {
+      recentWorkspaces = recentWorkspaces.filter((f) => pathKey(f) !== pathKey(file))
+      await saveWorkspaceSettings({ recent: recentWorkspaces })
+      throw err
+    }
+  } else {
+    data = { name: (await loadWorkspaceSettings()).name, folders: await loadWorkspacePaths(), files: await loadLooseFiles() }
+  }
+  workspace = { file, name: data.name }
+  workspaceWarning = ''
+  if (file) rememberWorkspace(file)
+  await saveWorkspaceSettings({ file, recent: recentWorkspaces })
+  await openWorkspace(data.folders, data.files)
+  win?.setTitle(`${workspaceTitle()} — Study Docs`)
+  syncSearch()
+  await pushSnapshot()
+}
+
+/** Switching drops an edit not saved yet: ask first. True: go ahead. */
+async function okToLeaveEdits(): Promise<boolean> {
+  if (!unsavedEdits) return true
+  const answer = await askInWindow({
+    message: t('Bài đang sửa có thay đổi chưa lưu. Vẫn mở workspace khác?'),
+    detail: t('Các thay đổi chưa lưu sẽ mất.'),
+    buttons: [t('Vẫn mở'), t('Ở lại')],
+    cancelId: 1
+  })
+  return answer === 0
+}
+
+function workspaceTitle(): string {
+  if (workspace.name) return workspace.name
+  const folders = folderRoots()
+  return folders.length === 1 ? folders[0].name || path.basename(folders[0].path) : 'Workspace'
+}
+
+/** A workspace file given on the command line (double-clicked in Explorer). */
+function workspaceInArgs(argv: string[], cwd = process.cwd()): string | null {
+  const arg = argv.slice(1).find((a) => !a.startsWith('-') && a.toLowerCase().endsWith(WORKSPACE_EXT))
+  return arg ? path.resolve(cwd, arg) : null
+}
 
 /**
  * Opens documents by path (Ctrl+O, drag and drop, Explorer). Files inside a workspace folder
@@ -618,7 +714,7 @@ async function addRoots(paths: string[]): Promise<string[]> {
   }
   roots.push(...added)
   relabel()
-  await saveWorkspacePaths(folderRoots().map((r) => r.path))
+  await persistWorkspace()
   await openRoots(added)
   for (const folder of added) if (folder.meta) await absorbLooseRoots(folder)
   if (added.length) {
@@ -634,7 +730,7 @@ async function removeRoot(key: string): Promise<void> {
   closeRoot(root)
   roots = roots.filter((r) => r !== root)
   relabel()
-  await saveWorkspacePaths(folderRoots().map((r) => r.path))
+  await persistWorkspace()
   syncSearch()
 }
 
@@ -1640,6 +1736,79 @@ function registerIpc(): void {
   })
   ipcMain.handle('files:add', (_e, paths: unknown) => addFiles(Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string') : []))
   ipcMain.handle('files:remove', (_e, abs: string) => removeLooseFile(String(abs)))
+
+  // ---------- workspace files (.studyws) ----------
+  const workspaceFilters = [{ name: t('Workspace Study Docs'), extensions: [WORKSPACE_EXT.slice(1)] }]
+  const askWorkspacePath = async (title: string, name: string): Promise<string | null> => {
+    const { canceled, filePath } = await dialog.showSaveDialog(win!, {
+      title,
+      defaultPath: path.join(workspace.file ? path.dirname(workspace.file) : app.getPath('documents'), `${name.replace(/[\\/:*?"<>|]/g, '-') || 'Workspace'}${WORKSPACE_EXT}`),
+      filters: workspaceFilters
+    })
+    if (canceled || !filePath) return null
+    return filePath.toLowerCase().endsWith(WORKSPACE_EXT) ? filePath : filePath + WORKSPACE_EXT
+  }
+  /** Opens a workspace file (asks which when none is given). False: nothing was opened. */
+  ipcMain.handle('workspace:open', async (_e, file?: unknown) => {
+    let target = typeof file === 'string' && file ? file : null
+    if (!target) {
+      const { canceled, filePaths } = await dialog.showOpenDialog(win!, { title: t('Mở workspace'), properties: ['openFile'], filters: workspaceFilters })
+      if (canceled || !filePaths[0]) return false
+      target = filePaths[0]
+    }
+    if (!(await okToLeaveEdits())) return false
+    await switchWorkspace(target)
+    return true
+  })
+  /** Saves the workspace open now as a file (path given: no dialog); from then on that file is the workspace. */
+  ipcMain.handle('workspace:saveAs', async (_e, given?: unknown) => {
+    const file = typeof given === 'string' && given.toLowerCase().endsWith(WORKSPACE_EXT) ? path.resolve(given) : await askWorkspacePath(t('Lưu workspace thành file'), workspaceTitle())
+    if (!file) return false
+    const name = workspace.name || nameFromFile(file)
+    try {
+      await writeWorkspaceFile(file, { name, folders: folderRoots().map((r) => r.path), files: roots.filter((r) => r.loose).flatMap((r) => r.files) })
+    } catch (err) {
+      throw friendlyWriteError(err)
+    }
+    workspace = { file, name }
+    rememberWorkspace(file)
+    await saveWorkspaceSettings({ file, recent: recentWorkspaces })
+    win?.setTitle(`${workspaceTitle()} — Study Docs`)
+    await pushSnapshot()
+    return true
+  })
+  /** A new, empty workspace file, opened right away. */
+  ipcMain.handle('workspace:new', async () => {
+    const file = await askWorkspacePath(t('Tạo workspace mới'), t('Workspace mới'))
+    if (!file) return false
+    if (!(await okToLeaveEdits())) return false
+    try {
+      await writeWorkspaceFile(file, { name: nameFromFile(file), folders: [], files: [] })
+    } catch (err) {
+      throw friendlyWriteError(err)
+    }
+    await switchWorkspace(file)
+    return true
+  })
+  /** Back to the workspace kept in the app (the one before any workspace file). */
+  ipcMain.handle('workspace:close', async () => {
+    if (!workspace.file) return false
+    if (!(await okToLeaveEdits())) return false
+    await switchWorkspace(null)
+    return true
+  })
+  ipcMain.handle('workspace:rename', async (_e, name: unknown) => {
+    workspace = { ...workspace, name: cleanName(name) || (workspace.file ? nameFromFile(workspace.file) : '') }
+    if (workspace.file) await persistWorkspace()
+    else await saveWorkspaceSettings({ name: workspace.name })
+    win?.setTitle(`${workspaceTitle()} — Study Docs`)
+    await pushSnapshot()
+  })
+  ipcMain.handle('workspace:forget', async (_e, file: unknown) => {
+    recentWorkspaces = recentWorkspaces.filter((f) => pathKey(f) !== pathKey(String(file)))
+    await saveWorkspaceSettings({ recent: recentWorkspaces })
+    await pushSnapshot()
+  })
   ipcMain.handle('data:export', async () => {
     const stamp = new Date().toISOString().slice(0, 10)
     const { canceled, filePath } = await dialog.showSaveDialog(win!, {
@@ -2053,6 +2222,17 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', (_e, argv, cwd) => {
     if (win?.isMinimized()) win.restore()
     win?.focus()
+    const wsFile = workspaceInArgs(argv, cwd)
+    if (wsFile) {
+      void (async () => {
+        if (!(await okToLeaveEdits())) return
+        await switchWorkspace(wsFile).catch((err: unknown) => {
+          workspaceWarning = (err as Error).message
+          void pushSnapshot()
+        })
+      })()
+      return
+    }
     const [file] = filesInArgs(argv, cwd)
     if (file) void openFromExplorer(file)
   })
@@ -2137,7 +2317,21 @@ if (!app.requestSingleInstanceLock()) {
 
     // DOCS_LIBRARY lets you (or the smoke test) open folders directly, separated by ";".
     const fromEnv = (process.env.DOCS_LIBRARY ?? '').split(path.delimiter).filter(Boolean)
-    await openWorkspace(fromEnv.length ? fromEnv : await loadWorkspacePaths(), await loadLooseFiles())
+    const saved = await loadWorkspaceSettings()
+    recentWorkspaces = saved.recent
+    const wanted = workspaceInArgs(process.argv) ?? (fromEnv.length ? null : saved.file)
+    if (fromEnv.length && !wanted) {
+      workspace = { file: null, name: saved.name }
+      await openWorkspace(fromEnv, await loadLooseFiles())
+    } else {
+      try {
+        await switchWorkspace(wanted)
+      } catch (err) {
+        await switchWorkspace(null)
+        workspaceWarning = (err as Error).message
+        await pushSnapshot()
+      }
+    }
 
     // Calendars followed by link: fresh copies now and every 30 minutes; reminders every 30 s.
     void refreshSubscriptions()

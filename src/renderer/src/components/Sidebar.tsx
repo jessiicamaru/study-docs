@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import type { AppInfo, DocEntry, LibrarySnapshot, RootInfo, SearchResult, SearchStatus } from '../../../shared/types'
+import { WorkspaceMenu } from './WorkspaceMenu'
 import { buildTree, kindLabel, loadLocal, metaOf, saveLocal, STATUSES, type TreeFolder, DOC_DRAG_TYPE, FOLDER_DRAG_TYPE } from '../lib/docs'
 import { timeAgo } from '../lib/ui'
 import type { StatusFilter } from '../App'
@@ -53,6 +54,7 @@ interface Props {
   sort: 'name' | 'modified'
   onOpenFiles: () => void
   onRemoveLoose: (path: string) => void
+  onError: (err: unknown) => void
   files: FileActions
 }
 
@@ -62,8 +64,9 @@ export default function Sidebar(props: Props) {
   const meta = lib?.meta ?? {}
   // Workspace folders; the folders of loose files only show in the "File lẻ" group.
   const roots = (lib?.roots ?? []).filter((r) => !r.loose)
-  const workspaceName =
-    roots.length === 0 ? t('Chưa có thư mục') : roots.length === 1 ? roots[0].name : t('Workspace · {0} thư mục', { 0: roots.length })
+  const autoName = roots.length === 0 ? t('Chưa có thư mục') : roots.length === 1 ? roots[0].name : t('Workspace · {0} thư mục', { 0: roots.length })
+  const workspaceName = lib?.workspace.name || autoName
+  const [wsMenu, setWsMenu] = useState(false)
   const rootNames = Object.fromEntries((lib?.roots ?? []).map((r) => [r.key, r.name]))
   const looseFiles = lib?.looseFiles ?? []
   const listRef = useRef<HTMLDivElement>(null)
@@ -94,9 +97,18 @@ export default function Sidebar(props: Props) {
     <aside className="sidebar">
       <div className="sidebar-head">
         <div className="sidebar-title">
-          <div className="library-name" title={roots.map((r) => r.path).join('\n')}>
-            {workspaceName}
-          </div>
+          <button
+            className={`library-name ${wsMenu ? 'open' : ''}`}
+            title={[lib?.workspace.file, ...roots.map((r) => r.path)].filter(Boolean).join('\n')}
+            aria-haspopup="menu"
+            aria-expanded={wsMenu}
+            onClick={() => setWsMenu(!wsMenu)}
+          >
+            <span className="library-name-text">{workspaceName}</span>
+            <span className="library-caret" aria-hidden>
+              ▾
+            </span>
+          </button>
           <button className="icon-btn" title={t('Ẩn thanh bên (Ctrl+\\)')} aria-label={t('Ẩn thanh bên')} onClick={props.onHide}>
             <PanelIcon />
           </button>
@@ -123,6 +135,7 @@ export default function Sidebar(props: Props) {
           <GearIcon />
         </button>
         </div>
+        {wsMenu && lib && <WorkspaceMenu info={lib.workspace} title={autoName} onClose={() => setWsMenu(false)} onError={props.onError} />}
         {props.recentOpen && (
           <RecentPopover lib={lib} selected={selected} onOpen={onOpen} onClose={() => props.onRecentOpen(false)} />
         )}

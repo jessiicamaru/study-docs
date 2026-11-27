@@ -284,7 +284,26 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1
   position: absolute; z-index: 20; background: var(--paper); border: 1px solid var(--line);
   border-radius: 12px; box-shadow: 0 10px 32px rgba(0, 0, 0, .18); padding: 6px;
 }
-.recent-popover { top: 48px; left: 10px; right: 10px; max-height: 60vh; overflow-y: auto; }
+.recent-popover { top: calc(100% - 2px); left: 10px; right: 10px; max-height: 60vh; overflow-y: auto; }
+/* The workspace name opens its menu. */
+button.library-name { display: flex; align-items: center; gap: 4px; min-width: 0; border: none; background: none; padding: 2px 6px; margin-left: -6px; border-radius: 8px; text-align: left; cursor: pointer; font-family: inherit; }
+button.library-name:hover, button.library-name.open { background: var(--hover); }
+.library-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-caret { flex: none; font-size: 11px; color: var(--ink-faint); -webkit-text-fill-color: var(--ink-faint); }
+.workspace-menu { top: 44px; left: 10px; right: 10px; display: flex; flex-direction: column; max-height: 75vh; overflow-y: auto; }
+.workspace-menu > button, .workspace-recent > button:first-child { border: none; background: transparent; text-align: left; padding: 8px 10px; border-radius: 8px; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.workspace-menu > button:hover, .workspace-recent > button:first-child:hover { background: var(--hover); }
+.workspace-current { padding: 6px 8px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+.workspace-name-btn { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; width: 100%; border: none; background: none; padding: 0; text-align: left; color: var(--ink); font: inherit; cursor: pointer; }
+.workspace-name-btn b { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-name-btn span { flex: none; font-size: 12px; color: var(--accent); }
+.workspace-current input { width: 100%; box-sizing: border-box; padding: 5px 8px; border: 1px solid var(--accent); border-radius: 6px; background: var(--paper); color: var(--ink); font: inherit; font-size: 14px; font-weight: 700; outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+.workspace-file { margin-top: 3px; font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.workspace-recent { display: flex; align-items: center; }
+.workspace-recent > button:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-recent .icon-btn { opacity: 0; }
+.workspace-recent:hover .icon-btn { opacity: 1; }
+.workspace-hint { margin-top: 4px; padding: 8px 10px 4px; border-top: 1px solid var(--line); font-size: 11.5px; line-height: 1.5; color: var(--ink-faint); }
 .row-time { flex-shrink: 0; font-size: 11px; color: var(--ink-faint); }
 .more { position: relative; }
 .popover.menu { right: 0; top: calc(100% + 6px); min-width: 210px; display: flex; flex-direction: column; }
@@ -859,10 +878,8 @@ body {
   backdrop-filter: blur(18px) saturate(1.3);
   border-right-color: color-mix(in srgb, var(--line) 70%, transparent);
 }
-.library-name {
-  background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent;
-  font-size: 16px; letter-spacing: -.01em;
-}
+.library-name { font-size: 16px; letter-spacing: -.01em; }
+.library-name-text { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .icon-btn { transition: background .15s, color .15s, transform .15s var(--ease); }
 .icon-btn:hover { transform: translateY(-1px); color: var(--accent); }
 .icon-btn:active { transform: scale(.94); }

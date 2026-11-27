@@ -19,6 +19,12 @@ interface Settings {
   /** Before v0.4 the workspace was a single folder; read once and migrated. */
   libraryPath?: string
   ui?: Partial<UiSettings>
+  /** The workspace file (.studyws) open at the last start; none: the workspace kept here. */
+  workspaceFile?: string | null
+  /** Name you gave the workspace kept here (a workspace file has its own). */
+  workspaceName?: string
+  /** Workspace files opened lately, newest first. */
+  recentWorkspaces?: string[]
 }
 
 /** v2: { version: 2, files: { "<absolute path, lower-case on Windows>": timestamp } } */
@@ -62,6 +68,29 @@ export async function loadWorkspacePaths(): Promise<string[]> {
 
 export async function saveWorkspacePaths(paths: string[]): Promise<void> {
   await saveSettings({ libraryPaths: paths, libraryPath: undefined }) // undefined is dropped from the JSON
+}
+
+export interface WorkspaceSettings {
+  file: string | null
+  name: string
+  recent: string[]
+}
+
+export async function loadWorkspaceSettings(): Promise<WorkspaceSettings> {
+  const s = await loadSettings()
+  return {
+    file: typeof s.workspaceFile === 'string' && s.workspaceFile ? s.workspaceFile : null,
+    name: typeof s.workspaceName === 'string' ? s.workspaceName : '',
+    recent: Array.isArray(s.recentWorkspaces) ? s.recentWorkspaces.filter((p) => typeof p === 'string') : []
+  }
+}
+
+export async function saveWorkspaceSettings(w: Partial<WorkspaceSettings>): Promise<void> {
+  const patch: Settings = {}
+  if (w.file !== undefined) patch.workspaceFile = w.file
+  if (w.name !== undefined) patch.workspaceName = w.name
+  if (w.recent !== undefined) patch.recentWorkspaces = w.recent
+  await saveSettings(patch)
 }
 
 export async function loadLooseFiles(): Promise<string[]> {

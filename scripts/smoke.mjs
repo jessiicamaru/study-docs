@@ -1174,7 +1174,7 @@ try {
   await page.hover('.root-row:has-text("notes")')
   await page.click('.root-row:has-text("notes") .root-remove')
   await page.waitForFunction(() => document.querySelectorAll('.root-row').length === 0)
-  check((await page.textContent('.library-name')) === 'library', 'removed folder disappears; workspace shows the one folder left')
+  check((await page.textContent('.library-name-text')) === 'library', 'removed folder disappears; workspace shows the one folder left')
   check(existsSync(path.join(notes, 'devops', 'Docker cơ bản.md')), 'removing a folder does not delete its files')
   const ws = JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8')).libraryPaths
   check(Array.isArray(ws) && ws.length === 1, 'workspace folders saved in settings')
@@ -1197,7 +1197,7 @@ try {
   await openWithApp(path.join(extra, 'Ngoài workspace.md'))
   await docPathIs('Ngoài workspace.md')
   await page.waitForSelector('.loose-group .row.doc >> text=Ngoài workspace')
-  check((await page.textContent('.library-name')) === 'library', 'a file outside the workspace opens as a loose file; no folder is added')
+  check((await page.textContent('.library-name-text')) === 'library', 'a file outside the workspace opens as a loose file; no folder is added')
 
   // Its tags go to the app's data folder too; nothing is written next to the file.
   await page.fill('.tag-editor input', 'le')
@@ -1213,7 +1213,7 @@ try {
     globalThis.__realOpen = dialog.showOpenDialog
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] })
   }, path.join(extra, 'Thêm.md'))
-  await page.click('.sidebar-head .library-name')
+  await page.click('.sidebar-foot')
   await page.keyboard.press('Control+O')
   await docPathIs('Thêm.md')
   check((await page.locator('.loose-group .row.doc').count()) === 2, 'Ctrl+O opens a file and lists it under "File lẻ"')
@@ -1498,7 +1498,7 @@ try {
   check(newHtml.startsWith('<!doctype html>') && newHtml.includes('<h1>Ghi chép HTML</h1>') && newHtml.includes('<meta charset="utf-8">'), 'a new HTML note: a small page with its title, opened right away')
 
   // Ctrl+N: next to the open note, and the last type chosen is the default.
-  await page.click('.sidebar-head .library-name')
+  await page.click('.sidebar-foot')
   await page.keyboard.press('Control+N')
   await page.waitForSelector('dialog.name-dialog[open]')
   const defaultKind = await page.textContent('dialog.name-dialog .name-kind button.active')
@@ -2073,7 +2073,7 @@ try {
   await page.mouse.up()
   await page.click('.hl-translate-btn')
   await page.waitForSelector('.translate-popover .translate-text:not(.loading)')
-  check((await page.textContent('.translate-text')) === '[vi] A cache stores copies of data.', 'the selected text is translated into Vietnamese')
+  check((await page.textContent('.translate-text')) === '[vi] A cache stores copies of data.', `the selected text is translated into Vietnamese (${await page.textContent('.translate-text')})`)
   await page.click('.translate-actions >> text=Highlight + ghi chú')
   await page.waitForTimeout(500)
   const translated = await page.evaluate(async () => {
@@ -2164,6 +2164,37 @@ try {
   await page.click('.bookmark-item .bookmark-remove')
   await page.waitForSelector('.bookmark-item', { state: 'detached' })
   check((await page.evaluate((id) => window.api.bookmarks(id), bookId)).length === 0 && (await page.locator('.epub-ribbon').count()) === 0, '× in the list removes it')
+
+  step('46. Workspace files: name the workspace, save it as a .studyws file, open another, come back with its tabs')
+  await page.click('.library-name')
+  await page.click('.workspace-name-btn')
+  await page.fill('.workspace-current input', 'Ôn thi cuối kỳ')
+  await page.keyboard.press('Enter')
+  await page.waitForFunction(() => document.querySelector('.library-name-text')?.textContent === 'Ôn thi cuối kỳ')
+  await page.keyboard.press('Escape')
+  check(true, 'the workspace can be named')
+  const tabsBefore = await page.locator('.doc-tab').count()
+  const wsMain = path.join(workDir, 'Ôn thi cuối kỳ.studyws')
+  await page.evaluate((f) => window.api.saveWorkspaceAs(f), wsMain)
+  const wsJson = JSON.parse(readFileSync(wsMain, 'utf8'))
+  check(wsJson.name === 'Ôn thi cuối kỳ' && wsJson.folders[0] === 'library' && wsJson.folders.every((f) => !path.isAbsolute(f)) && !JSON.stringify(wsJson).includes('"items"'), `the file has the name and the folders (relative), no notes (${JSON.stringify(wsJson)})`)
+  check((await page.locator('.doc-tab').count()) === tabsBefore, 'saving as a file keeps the open tabs')
+  const wsOther = path.join(workDir, 'Chỉ notes.studyws')
+  writeFileSync(wsOther, JSON.stringify({ version: 1, name: 'Chỉ notes', folders: ['notes'], files: [] }))
+  await page.evaluate((f) => window.api.openWorkspace(f), wsOther)
+  await page.waitForFunction(() => document.querySelector('.library-name-text')?.textContent === 'Chỉ notes')
+  await page.waitForFunction(() => !document.querySelector('.doc-list')?.textContent.includes('Lộ trình Backend'))
+  check((await page.locator('.doc-tab').count()) === 0, 'another workspace file: only its folders, its own (no) tabs')
+  const k8s = await page.evaluate(async () => {
+    const lib = await window.api.getLibrary()
+    const id = lib.docs.find((d) => d.rel === 'devops/Kubernetes.md')?.path
+    return id ? lib.meta[id]?.tags ?? [] : null
+  })
+  check(JSON.stringify(k8s) === '["k8s"]', 'a folder keeps its tags in every workspace it is in')
+  await page.evaluate((f) => window.api.openWorkspace(f), wsMain)
+  await page.waitForSelector('.doc-list .row.doc >> text=Lộ trình Backend')
+  await page.waitForFunction((n) => document.querySelectorAll('.doc-tab').length === n, tabsBefore)
+  check(true, 'back in the first workspace, its tabs come back')
 
   check(errors.length === 0, `no console errors${errors.length ? ': ' + errors.join(' | ') : ''}`)
 } catch (err) {

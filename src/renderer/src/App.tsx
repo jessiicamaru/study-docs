@@ -62,8 +62,41 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null)
   // Open tabs (document ids), kept between runs. Only the selected one is loaded; the others
   // open again where you were reading (reading positions are kept per document).
-  const [tabs, setTabs] = useState<string[]>(() => loadLocal<string[]>('tabs:workspace', []))
-  useEffect(() => saveLocal('tabs:workspace', tabs), [tabs])
+  // Each workspace file has its own tabs; "workspace" is the one kept in the app.
+  const wsKey = (snap: LibrarySnapshot | null): string => (snap?.workspace.file ? `ws:${snap.workspace.file.toLowerCase()}` : 'workspace')
+  const wsKeyRef = useRef('') // '' until the library is loaded: nothing to save yet
+  const [tabs, setTabs] = useState<string[]>([])
+  useEffect(() => {
+    if (wsKeyRef.current) saveLocal(`tabs:${wsKeyRef.current}`, tabs)
+  }, [tabs])
+  const wsFolders = (snap: LibrarySnapshot): string =>
+    snap.roots
+      .filter((r) => !r.loose)
+      .map((r) => r.key)
+      .join(',')
+  const wsFoldersRef = useRef('')
+  const tabsRef = useRef(tabs)
+  tabsRef.current = tabs
+  /** Another workspace was opened: its own tabs and last document come back. */
+  const enterWorkspace = useCallback((snap: LibrarySnapshot) => {
+    const key = wsKey(snap)
+    const folders = wsFolders(snap)
+    // Same folders, only saved to a file now ("Lưu workspace thành file"): keep the tabs.
+    if (wsKeyRef.current && folders === wsFoldersRef.current) {
+      saveLocal(`tabs:${key}`, tabsRef.current)
+      saveLocal(`selected:${key}`, loadLocal<string | null>(`selected:${wsKeyRef.current}`, null))
+      wsKeyRef.current = key
+      return
+    }
+    wsKeyRef.current = key
+    wsFoldersRef.current = folders
+    const saved = loadLocal<string[]>(`tabs:${wsKeyRef.current}`, [])
+    const last = loadLocal<string | null>(`selected:${wsKeyRef.current}`, null)
+    setTabs(last && !saved.includes(last) ? [...saved, last] : saved)
+    setSelected(last)
+    document.title = `${snap.workspace.name || (snap.roots.filter((r) => !r.loose).length === 1 ? snap.roots.find((r) => !r.loose)!.name : 'Workspace')} — Study Docs`
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // The sidebar can be hidden (Ctrl+\ or its button) for more room to read; remembered.
   const [sidebarHidden, setSidebarHidden] = useState(() => loadLocal<boolean>('sidebar-hidden', false))
   const showSidebar = useCallback((show: boolean) => {
@@ -121,13 +154,16 @@ export default function App() {
       .getLibrary()
       .then((snap) => {
         setLib(snap)
-        const last = loadLocal<string | null>('selected:workspace', null)
-        setSelected(last)
-        if (last) setTabs((prev) => (prev.includes(last) ? prev : [...prev, last]))
+        enterWorkspace(snap)
       })
       .catch(notify)
-    return window.api.onLibraryChanged(setLib)
-  }, [notify])
+    return window.api.onLibraryChanged((snap) => {
+      setLib(snap)
+      if (wsKey(snap) !== wsKeyRef.current) enterWorkspace(snap)
+      else wsFoldersRef.current = wsFolders(snap) // folders added or removed in this workspace
+      document.title = `${snap.workspace.name || (snap.roots.filter((r) => !r.loose).length === 1 ? snap.roots.find((r) => !r.loose)!.name : 'Workspace')} — Study Docs`
+    })
+  }, [notify, enterWorkspace])
 
   // Clean up reading positions of documents that are gone, once a scan has finished (issue #8).
   // Only after seeing "scanning" turn off: before the first scan the list is still empty.
@@ -259,7 +295,7 @@ export default function App() {
       setSelected(path)
       changeView('docs')
       setScrollTarget((t) => ({ hash, n: t.n + 1 }))
-      saveLocal('selected:workspace', path)
+      saveLocal(`selected:${wsKeyRef.current}`, path)
       window.api
         .markOpened(path)
         .then((recent) => setLib((l) => l && { ...l, recent }))
@@ -291,7 +327,7 @@ export default function App() {
             setDirty(false)
           }
           setSelected(null)
-          saveLocal('selected:workspace', null)
+          saveLocal(`selected:${wsKeyRef.current}`, null)
         }
       }
       setTabs((prev) => prev.filter((p) => p !== path))
@@ -664,6 +700,7 @@ export default function App() {
         </nav>
       )}
       <Sidebar
+        onError={notify}
         onHide={() => showSidebar(false)}
         lib={lib}
         docs={visibleDocs}

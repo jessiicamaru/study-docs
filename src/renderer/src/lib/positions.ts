@@ -9,9 +9,9 @@ import type { DocEntry, RootInfo } from '../../../shared/types'
 const PREFIXES = ['pos:', 'epubpos:', 'epubloc:']
 
 /**
- * Keys that can go: documents that no longer exist, folders removed from the workspace, and
- * "% read" tables of an older version of a book. Folders that are only temporarily missing
- * (USB drive unplugged) keep their positions.
+ * Keys that can go: documents that no longer exist, and "% read" tables of an older version of
+ * a book. Folders that are only temporarily missing (USB drive unplugged), or not in the open
+ * workspace (another workspace file may have them), keep their positions.
  */
 export function staleKeys(keys: string[], docs: Pick<DocEntry, 'path' | 'mtime'>[], roots: Pick<RootInfo, 'key' | 'available'>[]): string[] {
   const mtimes = new Map(docs.map((d) => [d.path, d.mtime]))
@@ -27,7 +27,8 @@ export function staleKeys(keys: string[], docs: Pick<DocEntry, 'path' | 'mtime'>
       id = id.slice(0, cut)
     }
     const available = rootState.get(id.split('/')[0])
-    if (available === undefined) return true // folder no longer in the workspace
+    // A folder not in this workspace may be in another workspace file: keep its positions.
+    if (available === undefined) return false
     if (!available) return false // folder temporarily unavailable: keep
     if (!mtimes.has(id)) return true // document gone
     return version !== null && version !== String(mtimes.get(id))

@@ -91,6 +91,16 @@ export interface LibrarySnapshot {
   recovery: RecoveryItem[]
   /** Tags/notes saved for files that no longer exist (0 while scanning). */
   orphans: number
+  /** The workspace open now: a workspace file (.studyws), or (file null) the one kept in the app. */
+  workspace: WorkspaceInfo
+}
+
+export interface WorkspaceInfo {
+  /** '' = not named: the app shows the folder name or "Workspace". */
+  name: string
+  file: string | null
+  /** Workspace files opened lately (not the open one), newest first. */
+  recent: { path: string; name: string }[]
 }
 
 /** A question from the main process, shown in the app's own dialog. */
@@ -331,6 +341,15 @@ export interface DocsApi {
   addFiles(paths: string[]): Promise<string[]>
   /** Removes a file from "File lẻ" (the file and its notes stay). */
   removeLooseFile(path: string): Promise<void>
+  /** Opens a workspace file (none given: asks which). False when nothing was opened. */
+  openWorkspace(file?: string): Promise<boolean>
+  /** Saves the open workspace as a file (path given: no dialog). */
+  saveWorkspaceAs(file?: string): Promise<boolean>
+  newWorkspace(): Promise<boolean>
+  /** Back to the workspace kept in the app. */
+  closeWorkspaceFile(): Promise<boolean>
+  renameWorkspace(name: string): Promise<void>
+  forgetWorkspace(file: string): Promise<void>
   /** Path of a file dropped on the window. */
   pathForFile(file: File): string
   /** Saves all tags and notes to a file of your choice. Resolves with its path, or null if cancelled. */

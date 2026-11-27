@@ -127,6 +127,12 @@
         "name": "PDF",
         "description": "Tài liệu PDF",
         "role": "Viewer"
+      },
+      {
+        "ext": "studyws",
+        "name": "Study Docs Workspace",
+        "description": "Workspace Study Docs",
+        "role": "Editor"
       }
     ],
     "nsis": {
