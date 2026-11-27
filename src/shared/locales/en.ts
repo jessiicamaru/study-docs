@@ -333,6 +333,7 @@ export const EN: Record<string, string> = {
   'Ô này có công thức: app chỉ hiện kết quả Excel đã lưu. Hãy sửa công thức trong Excel.':
     'This cell has a formula: the app shows the result Excel saved. Edit the formula in Excel.',
   'Đã lưu.': 'Saved.',
+  'Dấu trang không hợp lệ.': 'Invalid bookmark.',
   'Google Dịch đang tạm chặn vì mạng của bạn vừa gửi nhiều yêu cầu (hay gặp với Wi-Fi chung, VPN). Đợi một lúc rồi bấm Thử lại.':
     'Google Translate is pausing requests from your network after many of them (common on shared Wi-Fi or a VPN). Wait a moment, then press Try again.',
   'Không dịch được': "Couldn't translate",
