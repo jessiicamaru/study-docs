@@ -258,8 +258,8 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1
 .banner button { border: none; background: transparent; font-size: 18px; line-height: 1; padding: 0 4px; color: var(--ink-soft); }
 .toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 10; max-width: 420px; }
 .toast {
-  background: #2a2f36; color: #f3efe8; padding: 10px 14px; border-radius: 10px; font-size: 13px; line-height: 1.5;
-  border-left: 4px solid #e0936b; box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
+  background: var(--paper); color: var(--ink); padding: 10px 14px; border-radius: 10px; font-size: 13px; line-height: 1.5;
+  border: 1px solid var(--line); border-left: 4px solid #e0936b; box-shadow: 0 6px 24px rgba(0, 0, 0, .18);
 }
 
 /* ---------- version + auto-update ---------- */
@@ -1081,6 +1081,12 @@ dialog::backdrop { backdrop-filter: blur(3px); }
   animation: sd-rise .2s var(--ease);
 }
 
+/* ---------- searching the notes ---------- */
+.note-search { position: relative; margin-bottom: 8px; }
+.note-search input { width: 100%; box-sizing: border-box; padding: 6px 44px 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); font: inherit; font-size: 12.5px; outline: none; }
+.note-search input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.note-search-count { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--ink-faint); pointer-events: none; }
+
 /* ---------- bookmarks (books) ---------- */
 .epub-ribbon {
   position: absolute; top: 0; right: 28px; z-index: 3; width: 22px; height: 34px; pointer-events: none;
@@ -1092,14 +1098,15 @@ dialog::backdrop { backdrop-filter: blur(3px); }
 .epub-bookmark-btn { color: var(--ink-faint); }
 .epub-bookmark-btn.on { color: var(--accent); }
 .bookmark-list { display: flex; flex-direction: column; gap: 2px; padding: 4px 2px 10px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
-.bookmark-head { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 8px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); }
+.bookmark-head { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); }
 .bookmark-hint { font-weight: 500; letter-spacing: 0; text-transform: none; }
 .bookmark-empty { padding: 4px 8px 6px; font-size: 12.5px; color: var(--ink-faint); line-height: 1.5; }
 .bookmark-item { display: flex; align-items: flex-start; border-radius: 8px; }
 .bookmark-item:hover { background: var(--hover); }
 .bookmark-go { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; border: none; background: none; text-align: left; padding: 6px 8px; cursor: pointer; color: var(--ink); }
-.bookmark-where { display: flex; gap: 6px; font-size: 12.5px; font-weight: 600; }
-.bookmark-where b { color: var(--accent); font-weight: 700; }
+.bookmark-where { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12.5px; font-weight: 600; }
+.bookmark-where > span { min-width: 0; }
+.bookmark-where b { flex: none; color: var(--accent); font-weight: 700; }
 .bookmark-quote { font-size: 12px; color: var(--ink-soft); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .bookmark-remove { flex: none; border: none; background: none; color: var(--ink-faint); font-size: 15px; padding: 6px 8px; border-radius: 6px; opacity: 0; cursor: pointer; }
 .bookmark-item:hover .bookmark-remove { opacity: 1; }

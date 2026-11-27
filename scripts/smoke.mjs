@@ -665,6 +665,15 @@ try {
   await page.waitForSelector('.note-card-text >> text=Nhớ: effect trả về hàm dọn dẹp.')
   check(true, 'notes panel lists the note')
   await page.screenshot({ path: shot('12-notes-panel') })
+  // Searching the notes: quote and note text, without accents.
+  await page.fill('.note-search input', 'don dep')
+  await page.waitForFunction(() => document.querySelectorAll('.note-card').length === 1)
+  check((await page.textContent('.note-search-count')) === '1/2', 'searching the notes (no accents) keeps only the matching one')
+  await page.fill('.note-search input', 'không có chữ này')
+  await page.waitForSelector('.note-card', { state: 'detached' })
+  await page.fill('.note-search input', '')
+  await page.waitForFunction(() => document.querySelectorAll('.note-card').length === 2)
+  check(true, 'clearing the search shows every note again')
 
   // 18b. A highlight is found again after the document is edited elsewhere.
   step('18b. Highlight survives an edit')
@@ -1709,6 +1718,9 @@ try {
   await page.keyboard.type('Mục lớn')
   await page.selectOption('.html-format .block-type', 'h2')
   await fmtFrame.waitForSelector('h2[data-sd-new]')
+  // The menu hands the keyboard back to the page a moment later; a person never types that fast.
+  await fmtFrame.waitForFunction(() => document.hasFocus())
+  await page.waitForTimeout(50)
   await page.keyboard.press('Enter')
   await page.selectOption('.html-format .block-type', 'ul')
   await fmtFrame.waitForSelector('ul[data-sd-new-list] li')

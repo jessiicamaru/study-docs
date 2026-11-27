@@ -10,6 +10,7 @@ import type { ScreenRect } from './reader'
 import { renderNote } from '../lib/note-md'
 import { t } from '../../../shared/i18n'
 import { confirmDialog } from '../lib/ask'
+import { foldAccents } from '../../../shared/text'
 
 /** A note shown as Markdown. */
 function NoteText({ text, className }: { text: string; className: string }) {
@@ -163,7 +164,7 @@ export function BookmarkList({ bookmarks, onGoto, onRemove }: { bookmarks: Bookm
           <div key={b.id} className="bookmark-item">
             <button className="bookmark-go" onClick={() => onGoto(b)} title={b.quote}>
               <span className="bookmark-where">
-                {b.chapter || t('Không rõ chương')}
+                <span>{b.chapter || t('Không rõ chương')}</span>
                 {b.percent !== null && <b>{b.percent}%</b>}
               </span>
               {b.quote && <span className="bookmark-quote">{b.quote}</span>}
@@ -350,11 +351,34 @@ export function NotesPanel({
   docNote: string
   onSaveDocNote: (text: string) => Promise<void>
 }) {
+  // Search the highlights: the quoted text and the note, ignoring case and Vietnamese accents.
+  const [query, setQuery] = useState('')
+  const words = foldAccents(query.trim()).split(/\s+/).filter(Boolean)
+  const shown = words.length
+    ? annotations.filter((a) => {
+        const hay = foldAccents(a.quote + ' ' + a.note)
+        return words.every((w) => hay.includes(w))
+      })
+    : annotations
   return (
     <>
       <DocNoteCard key={docNote} text={docNote} onSave={onSaveDocNote} />
       {!annotations.length && <div className="empty">{t('Bôi đen một đoạn trong bài để highlight hoặc ghi chú.')}</div>}
-      {annotations.map((a) => (
+      {annotations.length > 0 && (
+        <div className="note-search">
+          <input
+            type="search"
+            value={query}
+            placeholder={t('Tìm trong ghi chú…')}
+            aria-label={t('Tìm trong ghi chú')}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === 'Escape' && query && (e.stopPropagation(), setQuery(''))}
+          />
+          {words.length > 0 && <span className="note-search-count">{shown.length}/{annotations.length}</span>}
+        </div>
+      )}
+      {words.length > 0 && !shown.length && <div className="empty">{t('Không có ghi chú nào khớp.')}</div>}
+      {shown.map((a) => (
         <div key={a.id} className={`note-card ${missing.includes(a.id) ? 'missing' : ''}`} style={{ borderLeftColor: colorCss(a.color) }}>
           <button className="note-card-quote" onClick={() => onGoto(a)} title={t('Đi tới đoạn này')}>
             {a.quote}
