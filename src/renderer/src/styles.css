@@ -1069,3 +1069,4 @@ dialog::backdrop { backdrop-filter: blur(3px); }
 .translate-dots i:nth-child(3) { animation-delay: .3s; }
 @keyframes sd-blink { 50% { opacity: 1; transform: translateY(-2px); } }
 .hl-translate-btn { color: var(--accent); font-weight: 600; }
+.translate-head .translate-failed { color: #c24a4a; }

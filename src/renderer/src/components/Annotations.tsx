@@ -75,6 +75,7 @@ export function TranslatePopover({
   result,
   error,
   onOtherWay,
+  onRetry,
   onKeep,
   onClose
 }: {
@@ -84,6 +85,7 @@ export function TranslatePopover({
   result: TranslateResult | null
   error: string | null
   onOtherWay: () => void
+  onRetry: () => void
   onKeep: () => void
   onClose: () => void
 }) {
@@ -107,7 +109,7 @@ export function TranslatePopover({
   return (
     <div className="translate-popover" style={pos} ref={ref} role="dialog" aria-label={t('Bản dịch')}>
       <div className="translate-head">
-        <span>{result ? `${langName(result.from)} → ${langName(result.to)}` : t('Đang dịch…')}</span>
+        <span className={error ? 'translate-failed' : ''}>{result ? `${langName(result.from)} → ${langName(result.to)}` : error ? t('Không dịch được') : t('Đang dịch…')}</span>
         <span className="translate-by">Google Dịch</span>
       </div>
       <div className="translate-quote" title={quote}>{quote}</div>
@@ -129,7 +131,12 @@ export function TranslatePopover({
         >
           {copied ? t('Đã chép ✓') : t('Chép')}
         </button>
-        <button className="btn small" disabled={loading} onClick={onOtherWay} title={t('Dịch sang ngôn ngữ kia')}>
+        {error && !loading && (
+          <button className="btn small" onClick={onRetry}>
+            {t('Thử lại')}
+          </button>
+        )}
+        <button className="btn small" disabled={loading || !result} onClick={onOtherWay} title={t('Dịch sang ngôn ngữ kia')}>
           {result?.to === 'en' ? t('→ Tiếng Việt') : t('→ Tiếng Anh')}
         </button>
         <span className="spacer" />

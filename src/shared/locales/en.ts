@@ -333,8 +333,10 @@ export const EN: Record<string, string> = {
   'Ô này có công thức: app chỉ hiện kết quả Excel đã lưu. Hãy sửa công thức trong Excel.':
     'This cell has a formula: the app shows the result Excel saved. Edit the formula in Excel.',
   'Đã lưu.': 'Saved.',
-  'Google Dịch đang tạm chặn vì dịch quá nhiều trong thời gian ngắn. Hãy thử lại sau ít phút.': 'Google Translate is pausing requests after many in a short time. Try again in a few minutes.',
-  'Google Dịch không trả lời được (mã {0}). Hãy thử lại sau.': "Google Translate didn't answer (code {0}). Try again later.",
+  'Google Dịch đang tạm chặn vì mạng của bạn vừa gửi nhiều yêu cầu (hay gặp với Wi-Fi chung, VPN). Đợi một lúc rồi bấm Thử lại.':
+    'Google Translate is pausing requests from your network after many of them (common on shared Wi-Fi or a VPN). Wait a moment, then press Try again.',
+  'Không dịch được': "Couldn't translate",
+  'Thử lại': 'Try again',
   'Không kết nối được Google Dịch. Hãy kiểm tra mạng rồi thử lại.': "Couldn't reach Google Translate. Check the connection and try again.",
   'Chưa chọn chữ nào để dịch.': 'No text selected to translate.',
   'Dịch đoạn này (Google Dịch)': 'Translate this (Google Translate)',

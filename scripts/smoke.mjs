@@ -2066,6 +2066,35 @@ try {
     return (lib.notes[id] ?? [])[0]
   })
   check(translated?.quote === 'A cache stores copies of data.' && translated?.note === '[vi] A cache stores copies of data.', 'the text is highlighted with the translation as its note')
+  // Refused once (as Google does when a network sent many requests), then fine: "Thử lại".
+  await app.evaluate(({ ipcMain }) => {
+    let first = true
+    ipcMain.removeHandler('translate')
+    ipcMain.handle('translate', (_e, text, to) => {
+      if (first) {
+        first = false
+        throw new Error('Google Dịch đang tạm chặn')
+      }
+      return { text: `[${to}] ${text}`, from: 'en', to, cut: false }
+    })
+  })
+  writeFileSync(file('Dịch lại.md'), '# Dịch lại\n\nThe lecture starts at nine.\n')
+  await page.waitForSelector('.doc-list .row.doc >> text=Dịch lại', { timeout: 10000 })
+  await openDoc('Dịch lại')
+  await page.waitForSelector('.markdown p')
+  await page.waitForTimeout(600)
+  const para2 = await page.locator('.markdown p').first().boundingBox()
+  await page.mouse.move(para2.x + 1, para2.y + para2.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(para2.x + para2.width - 2, para2.y + para2.height / 2, { steps: 6 })
+  await page.mouse.up()
+  await page.click('.hl-translate-btn')
+  await page.waitForSelector('.translate-head .translate-failed')
+  check((await page.textContent('.translate-head .translate-failed')) === 'Không dịch được', 'a refused translation says so (not "Đang dịch…")')
+  await page.click('.translate-actions >> text=Thử lại')
+  await page.waitForFunction(() => document.querySelector('.translate-text')?.textContent === '[vi] The lecture starts at nine.')
+  check(true, '"Thử lại" translates it')
+  await page.keyboard.press('Escape')
 
   check(errors.length === 0, `no console errors${errors.length ? ': ' + errors.join(' | ') : ''}`)
 } catch (err) {

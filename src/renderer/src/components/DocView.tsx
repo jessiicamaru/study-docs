@@ -572,6 +572,7 @@ export default function DocView(props: Props) {
           result={translation.result}
           error={translation.error}
           onOtherWay={() => void translate(translation.sel, translation.result?.to === 'en' ? 'vi' : 'en')}
+          onRetry={() => void translate(translation.sel, loadLocal<'vi' | 'en'>('translate-to', 'vi'))}
           onKeep={() => {
             const { sel, result } = translation
             setTranslation(null)
