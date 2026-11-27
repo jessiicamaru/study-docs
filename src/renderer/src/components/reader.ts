@@ -42,6 +42,8 @@ export interface ReaderHandle {
   setAnnotations(items: Annotation[]): void
   /** Scrolls to a highlight and makes it blink. */
   gotoAnnotation(id: string): void
+  /** Books: shows a place (a bookmark). */
+  gotoPlace?(cfi: string): void
   clearSelection(): void
   /** Ctrl+F: finds every match and shows the first. */
   find(query: string): Promise<FindResult>

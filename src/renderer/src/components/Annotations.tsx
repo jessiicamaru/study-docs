@@ -5,7 +5,7 @@
 //  - NotesPanel: list of a document's highlights in the side panel
 
 import { useEffect, useRef, useState } from 'react'
-import type { Annotation, HighlightColor, TranslateResult } from '../../../shared/types'
+import type { Annotation, Bookmark, HighlightColor, TranslateResult } from '../../../shared/types'
 import type { ScreenRect } from './reader'
 import { renderNote } from '../lib/note-md'
 import { t } from '../../../shared/i18n'
@@ -145,6 +145,36 @@ export function TranslatePopover({
         </button>
       </div>
     </div>
+  )
+}
+
+/** The bookmarks of a book, in reading order: a click goes there, × removes it. */
+export function BookmarkList({ bookmarks, onGoto, onRemove }: { bookmarks: Bookmark[]; onGoto: (b: Bookmark) => void; onRemove: (b: Bookmark) => void }) {
+  return (
+    <section className="bookmark-list" aria-label={t('Dấu trang')}>
+      <div className="bookmark-head">
+        <span>{t('Dấu trang')}</span>
+        <span className="bookmark-hint">{t('Ctrl+D ở trang đang đọc')}</span>
+      </div>
+      {bookmarks.length === 0 ? (
+        <div className="bookmark-empty">{t('Chưa có dấu trang. Bấm biểu tượng dấu trang ở thanh dưới sách (hoặc Ctrl+D) để đánh dấu trang đang đọc.')}</div>
+      ) : (
+        bookmarks.map((b) => (
+          <div key={b.id} className="bookmark-item">
+            <button className="bookmark-go" onClick={() => onGoto(b)} title={b.quote}>
+              <span className="bookmark-where">
+                {b.chapter || t('Không rõ chương')}
+                {b.percent !== null && <b>{b.percent}%</b>}
+              </span>
+              {b.quote && <span className="bookmark-quote">{b.quote}</span>}
+            </button>
+            <button className="bookmark-remove" aria-label={t('Xoá dấu trang')} title={t('Xoá dấu trang')} onClick={() => onRemove(b)}>
+              ×
+            </button>
+          </div>
+        ))
+      )}
+    </section>
   )
 }
 

@@ -8,11 +8,11 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import ePub, { EpubCFI } from 'epubjs'
-import type { Annotation, DocEntry } from '../../../shared/types'
+import type { Annotation, Bookmark, DocEntry } from '../../../shared/types'
 import { loadLocal, saveLocal } from '../lib/docs'
 import { generateLocations } from '../lib/epub-locations'
 import { HIGHLIGHT_COLORS } from './Annotations'
-import type { FindResult, ReaderCallbacks, ReaderHandle } from './reader'
+import { newAnnotationId, type FindResult, type ReaderCallbacks, type ReaderHandle } from './reader'
 import { t } from '../../../shared/i18n'
 
 type Book = ReturnType<typeof ePub>
@@ -33,6 +33,18 @@ interface TocEntry {
 interface Props extends ReaderCallbacks {
   doc: DocEntry
   onError: (err: unknown) => void
+  /** Places kept in this book; the bar's button (or Ctrl+D) adds or removes the one on the pages shown. */
+  bookmarks?: Bookmark[]
+  onBookmarksChange?: (list: Bookmark[]) => void
+}
+
+/** a <= b in the book (two epub.js positions). */
+const cfiBefore = (a: string, b: string): boolean => {
+  try {
+    return new EpubCFI().compare(a, b) <= 0
+  } catch {
+    return false
+  }
 }
 
 const positionKey = (path: string): string => `epubpos:${path}`
@@ -173,6 +185,38 @@ const EpubView = forwardRef<ReaderHandle, Props>(function EpubView(props, ref) {
   const drawn = useRef<string[]>([])
   const bookRef = useRef<Book | null>(null)
   const [progress, setProgress] = useState<{ chapter: string; percent: number | null }>({ chapter: '', percent: null })
+  // The pages shown (from the start of the first to the end of the last) and your place in them.
+  const [shown, setShown] = useState<{ start: string; end: string } | null>(null)
+  const placeRef = useRef<string | null>(null)
+  // A bookmark on the pages shown (the ribbon, and the button that removes it).
+  const bookmarkHere = shown ? (props.bookmarks ?? []).find((b) => cfiBefore(shown.start, b.cfi) && cfiBefore(b.cfi, shown.end)) : undefined
+  /** Adds a bookmark at your place, or removes the one on the pages shown. */
+  const toggleBookmark = async (): Promise<void> => {
+    try {
+      if (bookmarkHere) {
+        cb.current.onBookmarksChange?.(await window.api.removeBookmark(doc.path, bookmarkHere.id))
+        return
+      }
+      const cfi = placeRef.current ?? shown?.start
+      if (!cfi) return
+      // The first words there, to recognise it in the list.
+      let quote = ''
+      try {
+        const range = (rendition.current as unknown as { getRange: (c: string) => Range | null } | null)?.getRange(cfi)
+        const node = range?.startContainer
+        const block = node && (node.nodeType === 1 ? (node as Element) : node.parentElement)
+        quote = (block?.closest('p, li, h1, h2, h3, h4, h5, h6, blockquote, div')?.textContent ?? block?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 140)
+      } catch {
+        // no text at hand: the chapter and % still say where it is
+      }
+      const mark: Bookmark = { id: newAnnotationId(), cfi, quote, chapter: progress.chapter, percent: progress.percent, created: Date.now() }
+      cb.current.onBookmarksChange?.(await window.api.addBookmark(doc.path, mark))
+    } catch (err) {
+      cb.current.onError(err)
+    }
+  }
+  const toggleRef = useRef(toggleBookmark)
+  toggleRef.current = toggleBookmark
   const cb = useRef(props)
   cb.current = props
 
@@ -270,7 +314,14 @@ const EpubView = forwardRef<ReaderHandle, Props>(function EpubView(props, ref) {
     // Keys when the focus is in the app rather than in the book.
     const onKey = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement
-      if (e.altKey || e.ctrlKey || e.metaKey || t.closest('input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]')) return
+      if (t.closest('input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]')) return
+      // Ctrl+D: bookmark this place (or remove the bookmark here).
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault()
+        void toggleRef.current()
+        return
+      }
+      if (e.altKey || e.ctrlKey || e.metaKey) return
       if (e.key === 'ArrowRight' || e.key === 'PageDown') next()
       if (e.key === 'ArrowLeft' || e.key === 'PageUp') prev()
     }
@@ -379,6 +430,8 @@ const EpubView = forwardRef<ReaderHandle, Props>(function EpubView(props, ref) {
         exactAfterRestore = null
         const place = lastCfi
         saveLocal(positionKey(doc.path), place)
+        placeRef.current = place
+        setShown({ start: location.start.cfi, end: location.end.cfi })
         const active = activeEntry(location)
         cb.current.onReading(0, active)
         const ready = (book?.locations as unknown as { length(): number } | undefined)?.length() ?? 0
@@ -456,6 +509,10 @@ const EpubView = forwardRef<ReaderHandle, Props>(function EpubView(props, ref) {
             e.preventDefault()
             window.dispatchEvent(new Event('studydocs:find'))
           }
+          if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'd') {
+            e.preventDefault()
+            void toggleRef.current()
+          }
         })
       })
       r.on('rendered', () => draw())
@@ -517,6 +574,15 @@ const EpubView = forwardRef<ReaderHandle, Props>(function EpubView(props, ref) {
       const cfi = annotations.current.find((a) => a.id === id)?.cfi
       if (cfi) void rendition.current?.display(cfi)
     },
+    gotoPlace: (cfi) => {
+      void rendition.current
+        ?.display(cfi)
+        .then(() => {
+          placeOnLeftPage(rendition.current, cfi)
+          showPlace(rendition.current, cfi)
+        })
+        .catch((err: unknown) => cb.current.onError(err))
+    },
     clearSelection: () => {
       const contents = rendition.current?.getContents() as unknown as { window: Window }[] | undefined
       for (const c of contents ?? []) c.window.getSelection()?.removeAllRanges()
@@ -550,6 +616,7 @@ const EpubView = forwardRef<ReaderHandle, Props>(function EpubView(props, ref) {
   return (
     <div className="epub-view">
       <div ref={hostRef} className="epub-host" />
+      {bookmarkHere && <div className="epub-ribbon" title={t('Trang này có dấu trang')} aria-hidden="true" />}
       <div className="epub-bar">
         <button className="icon-btn" title={t('Trang trước (←)')} onClick={prev}>
           ‹
@@ -558,7 +625,17 @@ const EpubView = forwardRef<ReaderHandle, Props>(function EpubView(props, ref) {
           {progress.chapter}
           {progress.percent !== null && <b>{progress.percent}%</b>}
         </span>
-        <button className="icon-btn" title="Trang sau (→)" onClick={next}>
+        <button
+          className={`icon-btn epub-bookmark-btn ${bookmarkHere ? 'on' : ''}`}
+          title={bookmarkHere ? t('Bỏ dấu trang ở đây (Ctrl+D)') : t('Đánh dấu trang này (Ctrl+D)')}
+          aria-pressed={!!bookmarkHere}
+          onClick={() => void toggleBookmark()}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill={bookmarkHere ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+            <path d="M6 3h12v18l-6-4.5L6 21z" />
+          </svg>
+        </button>
+        <button className="icon-btn" title={t('Trang sau (→)')} onClick={next}>
           ›
         </button>
       </div>

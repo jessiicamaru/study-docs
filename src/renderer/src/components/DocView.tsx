@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Annotation, DocEntry, DocMeta, HighlightColor, TranslateResult } from '../../../shared/types'
+import type { Annotation, Bookmark, DocEntry, DocMeta, HighlightColor, TranslateResult } from '../../../shared/types'
 import { errorMessage, loadLocal, saveLocal, STATUSES } from '../lib/docs'
 import type { ScrollTarget } from '../App'
 import HtmlView from './HtmlView'
@@ -15,7 +15,7 @@ import ArticleView from './ArticleView'
 import ImageView from './ImageView'
 import SheetView from './SheetView'
 import FindBar from './FindBar'
-import { HighlightToolbar, NotePopover, NotesPanel, TranslatePopover } from './Annotations'
+import { BookmarkList, HighlightToolbar, NotePopover, NotesPanel, TranslatePopover } from './Annotations'
 import { newAnnotationId, type OutlineItem, type ReaderHandle, type ScreenRect, type TextSelection } from './reader'
 import { t } from '../../../shared/i18n'
 import { normalize } from '../../../shared/text'
@@ -237,6 +237,29 @@ export default function DocView(props: Props) {
     if ((await saveAnnotation(a)) && openNote) setNoteEditor({ id: a.id, rect })
   }
 
+  // ---------- bookmarks (books) ----------
+  const isBook = doc.kind === 'epub' || doc.kind === 'mobi'
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
+  useEffect(() => {
+    if (!isBook) return
+    let alive = true
+    window.api
+      .bookmarks(doc.path)
+      .then((list) => alive && setBookmarks(list))
+      .catch(onError)
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc.path, isBook])
+  const removeBookmark = async (b: Bookmark): Promise<void> => {
+    try {
+      setBookmarks(await window.api.removeBookmark(doc.path, b.id))
+    } catch (err) {
+      onError(err)
+    }
+  }
+
   // ---------- translating the selected text ----------
   const [translation, setTranslation] = useState<{ sel: TextSelection; loading: boolean; result: TranslateResult | null; error: string | null } | null>(null)
   const translate = async (sel: TextSelection, to: 'vi' | 'en'): Promise<void> => {
@@ -308,7 +331,7 @@ export default function DocView(props: Props) {
     ) : doc.kind === 'sheet' ? (
       <SheetView doc={doc} onError={onError} onInfo={props.onInfo} onDirty={updateDirty} />
     ) : doc.kind === 'epub' || doc.kind === 'mobi' ? (
-      <EpubView {...readerProps} doc={doc} onError={onError} />
+      <EpubView {...readerProps} doc={doc} onError={onError} bookmarks={bookmarks} onBookmarksChange={setBookmarks} />
     ) : doc.kind === 'html' ? (
       <HtmlView
         {...readerProps}
@@ -373,6 +396,8 @@ export default function DocView(props: Props) {
                   value=""
                   onMouseDown={(e) => e.stopPropagation()}
                   onChange={(e) => {
+                    // The menu lets go of the keyboard first, so Enter right after goes to the page.
+                    e.target.blur()
                     if (e.target.value) readerRef.current?.setBlockType?.(e.target.value)
                     e.target.value = ''
                   }}
@@ -522,6 +547,9 @@ export default function DocView(props: Props) {
                 <button role="tab" aria-selected={panelTab === 'notes'} className={panelTab === 'notes' ? 'active' : ''} onClick={() => showPanelTab('notes')}>{t('Ghi chú')}{annotations.length > 0 && ` (${annotations.length})`}
                 </button>
               </div>
+              {panelTab === 'notes' && isBook && (
+                <BookmarkList bookmarks={bookmarks} onGoto={(b) => readerRef.current?.gotoPlace?.(b.cfi)} onRemove={(b) => void removeBookmark(b)} />
+              )}
               {panelTab === 'notes' && (
                 <NotesPanel
                   annotations={annotations}

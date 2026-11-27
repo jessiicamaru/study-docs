@@ -160,6 +160,8 @@ const HtmlView = forwardRef<ReaderHandle, Props>(function HtmlView(props, ref) {
       // The paragraph-type menu took the focus: give it back to the page, where the caret is.
       frameRef.current?.focus()
       post({ type: 'block', tag })
+      // Once the menu has finished closing too (it can take the focus back for a moment).
+      setTimeout(() => frameRef.current?.focus(), 0)
     },
     collectChanges: () =>
       new Promise((resolve, reject) => {
