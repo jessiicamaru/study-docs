@@ -22,6 +22,13 @@ export interface WorkspaceData {
   files: string[]
 }
 
+/**
+ * A path on another computer (\\server\share, //server/share). Just looking at one makes Windows
+ * connect to that computer and sign in with your account, so a workspace file from somewhere
+ * else must not open one without asking. (\\?\C:\… and \\.\C:\… are local.)
+ */
+export const isNetworkPath = (p: string): boolean => /^[\\/]{2}/.test(p) && !/^[\\/]{2}[?.][\\/][a-z]:/i.test(p)
+
 /** The name a workspace file gets when it has none: its file name. */
 export const nameFromFile = (file: string): string => path.basename(file).replace(/\.studyws$/i, '')
 

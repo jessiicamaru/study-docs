@@ -2189,9 +2189,21 @@ try {
   check(wsJson.name === 'Ôn thi cuối kỳ' && wsJson.folders[0] === 'library' && wsJson.folders.every((f) => !path.isAbsolute(f)) && !JSON.stringify(wsJson).includes('"items"'), `the file has the name and the folders (relative), no notes (${JSON.stringify(wsJson)})`)
   check((await page.locator('.doc-tab').count()) === tabsBefore, 'saving as a file keeps the open tabs')
   const wsOther = path.join(workDir, 'Chỉ notes.studyws')
-  writeFileSync(wsOther, JSON.stringify({ version: 1, name: 'Chỉ notes', folders: ['notes'], files: [] }))
-  await page.evaluate((f) => window.api.openWorkspace(f), wsOther)
+  // A workspace file from elsewhere, with a path on another computer in it.
+  writeFileSync(wsOther, JSON.stringify({ version: 1, name: 'Chỉ notes', folders: ['notes', '//studydocs-test.invalid/share'], files: [] }))
+  await setAnswer('hold') // this question is answered by hand below
+  const opening = page.evaluate((f) => window.api.openWorkspace(f), wsOther)
+  await page.waitForSelector('.ask >> text=Mở workspace "Chỉ notes"?')
+  const askText = await page.locator('dialog.ask .ask-detail').first().textContent()
+  check(askText.includes('đường dẫn mạng') && askText.includes('notes'), 'a workspace file not opened before is shown and asked about first (with its network paths)')
+  await page.click('.ask >> text=Mở, bỏ qua đường dẫn mạng')
+  check((await opening) === true, 'opened after saying yes')
+  await setAnswer('dismiss')
   await page.waitForFunction(() => document.querySelector('.library-name-text')?.textContent === 'Chỉ notes')
+  const otherRoots = await page.evaluate(async () => (await window.api.getLibrary()).roots.filter((r) => !r.loose).map((r) => r.path))
+  check(otherRoots.length === 1 && !otherRoots.some((p) => p.includes('invalid')), `the network path is not opened (${JSON.stringify(otherRoots)})`)
+  await page.evaluate(() => window.api.renameWorkspace('Chỉ notes'))
+  check(readFileSync(wsOther, 'utf8').includes('studydocs-test.invalid'), 'the skipped network path stays in the file when it is saved again')
   await page.waitForFunction(() => !document.querySelector('.doc-list')?.textContent.includes('Lộ trình Backend'))
   check((await page.locator('.doc-tab').count()) === 0, 'another workspace file: only its folders, its own (no) tabs')
   const k8s = await page.evaluate(async () => {

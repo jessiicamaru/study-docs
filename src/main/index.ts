@@ -19,7 +19,7 @@ import { ScanCache } from './scan-cache'
 import { SearchService } from './search'
 import { NotesStore, sanitizeAnnotation, sanitizeBookmark } from './notes-store'
 import { loadLooseFiles, loadRecent, loadUiSettings, loadWorkspacePaths, loadWorkspaceSettings, markOpened, sanitizeUi, saveLooseFiles, saveSettings, saveWorkspacePaths, saveWorkspaceSettings } from './storage'
-import { cleanName, nameFromFile, readWorkspaceFile, WORKSPACE_EXT, writeWorkspaceFile, type WorkspaceData } from './workspace-file'
+import { cleanName, isNetworkPath, nameFromFile, readWorkspaceFile, WORKSPACE_EXT, writeWorkspaceFile, type WorkspaceData } from './workspace-file'
 import { isSameOrInside, labelRoots, normalizeRoot, pathKey, rootConflict, rootKeyOf, splitDocId } from './workspace'
 import { canOpenWithDefaultApp } from './open-policy'
 import { looksLikeSameFolder, matchScore, remapEntries, type Remembered } from './relink'
@@ -545,9 +545,14 @@ const saveLoose = (): Promise<void> => persistWorkspace()
 
 // ---------- the workspace: kept in settings.json, or a workspace file (.studyws) ----------
 
-/** The workspace open now. `file` null: the one kept in settings.json. `name` '' = automatic. */
-let workspace: { file: string | null; name: string } = { file: null, name: '' }
+/**
+ * The workspace open now. `file` null: the one kept in settings.json. `name` '' = automatic.
+ * `skipped`: network paths of the file that were not opened; written back to the file as they were.
+ */
+let workspace: { file: string | null; name: string; skipped?: { folders: string[]; files: string[] } } = { file: null, name: '' }
 let recentWorkspaces: string[] = []
+/** Workspace files whose network paths (\\server\share) you allowed. */
+let networkOkWorkspaces: string[] = []
 /** Why the workspace file of the last start could not be opened (shown as a warning). */
 let workspaceWarning = ''
 const MAX_RECENT_WORKSPACES = 8
@@ -562,7 +567,8 @@ async function persistWorkspace(): Promise<void> {
     return
   }
   try {
-    await writeWorkspaceFile(workspace.file, { name: workspace.name, folders, files })
+    const skipped = workspace.skipped ?? { folders: [], files: [] }
+    await writeWorkspaceFile(workspace.file, { name: workspace.name, folders: [...folders, ...skipped.folders], files: [...files, ...skipped.files] })
   } catch (err) {
     throw friendlyWriteError(err)
   }
@@ -583,10 +589,52 @@ async function readWorkspaceOrExplain(file: string): Promise<WorkspaceData> {
   }
 }
 
-/** Opens a workspace file, or (null) the workspace kept in settings.json. */
-async function switchWorkspace(target: string | null): Promise<void> {
+const isKnownWorkspace = (file: string): boolean => recentWorkspaces.some((f) => pathKey(f) === pathKey(file))
+
+/**
+ * A workspace file not opened before (double-clicked, or picked in the open dialog): show what is
+ * in it and ask. Network paths are asked about on their own. Null: don't open it.
+ */
+async function askToOpenWorkspace(file: string, data: WorkspaceData): Promise<{ network: boolean } | null> {
+  const network = [...data.folders, ...data.files].filter(isNetworkPath)
+  const shown = data.folders.slice(0, 8).map((f) => `• ${f}`)
+  if (data.folders.length > 8) shown.push(t('… và {0} thư mục khác', { 0: data.folders.length - 8 }))
+  const detail = [
+    data.folders.length ? t('Thư mục trong workspace này:') : t('Workspace này chưa có thư mục nào.'),
+    ...shown,
+    ...(data.files.length ? [t('và {0} file lẻ.', { 0: data.files.length })] : []),
+    ...(network.length
+      ? ['', t('Có {0} đường dẫn mạng (\\\\máy\\thư mục). Mở chúng, Windows sẽ kết nối tới máy đó bằng tài khoản của bạn: chỉ mở nếu bạn tin nguồn của file này.', { 0: network.length })]
+      : [])
+  ].join('\n')
+  const buttons = network.length ? [t('Mở, bỏ qua đường dẫn mạng'), t('Mở cả đường dẫn mạng'), t('Huỷ')] : [t('Mở'), t('Huỷ')]
+  const answer = await askInWindow({
+    message: t('Mở workspace "{0}"?', { 0: data.name || nameFromFile(file) }),
+    detail,
+    buttons,
+    cancelId: buttons.length - 1
+  })
+  if (answer === buttons.length - 1) return null
+  return { network: network.length > 0 && answer === 1 }
+}
+
+// One switch at a time: a second one waits for the first to finish.
+let switching: Promise<unknown> = Promise.resolve()
+
+/**
+ * Opens a workspace file, or (null) the workspace kept in settings.json. A file not opened before
+ * is shown first and asked about. Resolves false when you said no.
+ */
+function switchWorkspace(target: string | null, askAgain = false): Promise<boolean> {
+  const run = switching.then(() => doSwitchWorkspace(target, askAgain))
+  switching = run.catch(() => {})
+  return run
+}
+
+async function doSwitchWorkspace(target: string | null, askAgain: boolean): Promise<boolean> {
   const file = target ? path.resolve(target) : null
   let data: WorkspaceData
+  let skipped = { folders: [] as string[], files: [] as string[] }
   if (file) {
     try {
       data = await readWorkspaceOrExplain(file)
@@ -595,17 +643,32 @@ async function switchWorkspace(target: string | null): Promise<void> {
       await saveWorkspaceSettings({ recent: recentWorkspaces })
       throw err
     }
+    if (askAgain || !isKnownWorkspace(file)) {
+      const answer = await askToOpenWorkspace(file, data)
+      if (!answer) return false
+      networkOkWorkspaces = networkOkWorkspaces.filter((f) => pathKey(f) !== pathKey(file))
+      if (answer.network) networkOkWorkspaces.push(file)
+    }
+    if (!networkOkWorkspaces.some((f) => pathKey(f) === pathKey(file))) {
+      skipped = { folders: data.folders.filter(isNetworkPath), files: data.files.filter(isNetworkPath) }
+      data = { ...data, folders: data.folders.filter((p) => !isNetworkPath(p)), files: data.files.filter((p) => !isNetworkPath(p)) }
+    }
   } else {
     data = { name: (await loadWorkspaceSettings()).name, folders: await loadWorkspacePaths(), files: await loadLooseFiles() }
   }
-  workspace = { file, name: data.name }
-  workspaceWarning = ''
+  // The open workspace and its folders change together, with nothing in between: a save
+  // happening meanwhile must not write one workspace's folders into the other's file.
+  workspace = { file, name: data.name, skipped }
+  const opening = openWorkspace(data.folders, data.files)
+  const left = skipped.folders.length + skipped.files.length
+  workspaceWarning = left ? t('{0} đường dẫn mạng trong workspace này chưa được mở (để an toàn). Mở lại file workspace từ "Mở workspace…" để cho phép.', { 0: left }) : ''
   if (file) rememberWorkspace(file)
-  await saveWorkspaceSettings({ file, recent: recentWorkspaces })
-  await openWorkspace(data.folders, data.files)
+  await saveWorkspaceSettings({ file, recent: recentWorkspaces, networkOk: networkOkWorkspaces })
+  await opening
   win?.setTitle(`${workspaceTitle()} — Study Docs`)
   syncSearch()
   await pushSnapshot()
+  return true
 }
 
 /** Switching drops an edit not saved yet: ask first. True: go ahead. */
@@ -1757,8 +1820,8 @@ function registerIpc(): void {
       target = filePaths[0]
     }
     if (!(await okToLeaveEdits())) return false
-    await switchWorkspace(target)
-    return true
+    // Picked in the dialog: show what is in it again (and ask about its network paths).
+    return switchWorkspace(target, !file)
   })
   /** Saves the workspace open now as a file (path given: no dialog); from then on that file is the workspace. */
   ipcMain.handle('workspace:saveAs', async (_e, given?: unknown) => {
@@ -2319,13 +2382,15 @@ if (!app.requestSingleInstanceLock()) {
     const fromEnv = (process.env.DOCS_LIBRARY ?? '').split(path.delimiter).filter(Boolean)
     const saved = await loadWorkspaceSettings()
     recentWorkspaces = saved.recent
+    networkOkWorkspaces = saved.networkOk
     const wanted = workspaceInArgs(process.argv) ?? (fromEnv.length ? null : saved.file)
     if (fromEnv.length && !wanted) {
       workspace = { file: null, name: saved.name }
       await openWorkspace(fromEnv, await loadLooseFiles())
     } else {
       try {
-        await switchWorkspace(wanted)
+        // A workspace file double-clicked and not opened: the app's own workspace.
+        if (!(await switchWorkspace(wanted))) await switchWorkspace(null)
       } catch (err) {
         await switchWorkspace(null)
         workspaceWarning = (err as Error).message

@@ -60,3 +60,16 @@ describe('workspace file', () => {
     }
   })
 })
+
+describe('network paths in a workspace file', () => {
+  it('tells paths on another computer from local ones', async () => {
+    const { isNetworkPath } = await import('../src/main/workspace-file')
+    expect(isNetworkPath('\\\\server\\share\\Docs')).toBe(true)
+    expect(isNetworkPath('//server/share')).toBe(true)
+    expect(isNetworkPath('\\\\?\\UNC\\server\\share')).toBe(true)
+    expect(isNetworkPath('\\\\?\\C:\\Docs')).toBe(false)
+    expect(isNetworkPath('\\\\.\\D:\\Docs')).toBe(false)
+    expect(isNetworkPath('C:\\Users\\a\\Docs')).toBe(false)
+    expect(isNetworkPath('/home/a/docs')).toBe(false)
+  })
+})
